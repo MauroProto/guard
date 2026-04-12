@@ -1,0 +1,11 @@
+packages:
+  - "packages/*"
+
+minimumReleaseAge: 1440
+trustPolicy: no-downgrade
+trustPolicyIgnoreAfter: 43200
+blockExoticSubdeps: true
+strictDepBuilds: true
+allowBuilds: {}
+packageManagerStrict: true
+managePackageManagerVersions: true

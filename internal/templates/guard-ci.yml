@@ -1,0 +1,26 @@
+name: Guard CI
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  guard:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@b4ffde65f46336ab88eb53be808477a3936bae11
+      - name: Install Guard
+        run: |
+          # TODO: replace with actual install method once Guard is published
+          go install guard@latest
+      - name: Run Guard CI
+        run: guard ci --format sarif --output guard.sarif
+      - name: Upload SARIF
+        if: always()
+        uses: github/codeql-action/upload-sarif@b611370bb5703a7efb587f9d136a52ea24c5c38c
+        with:
+          sarif_file: guard.sarif

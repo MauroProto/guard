@@ -1,0 +1,16 @@
+# Binary
+guard
+dist/
+
+# Guard cache
+.guard/cache/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo

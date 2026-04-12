@@ -1,0 +1,36 @@
+version: 1
+
+project:
+  name: healthy
+  ecosystem: node
+  packageManager: pnpm
+
+enforcement:
+  failOn: high
+  outputDefaults:
+    - terminal
+    - json
+
+pnpm:
+  minimumReleaseAgeMinutes: 1440
+  minimumReleaseAgeExclude: []
+  trustPolicy: no-downgrade
+  trustPolicyIgnoreAfterMinutes: 43200
+  blockExoticSubdeps: true
+  strictDepBuilds: true
+  allowBuilds: {}
+  requireLockfile: true
+  requireFrozenLockfileInCI: true
+  requirePackageManagerField: true
+  requireNodeEngine: true
+
+github:
+  requirePinnedActions: true
+  requireReadOnlyDefaultToken: true
+  requireCodeownersForWorkflows: true
+  workflowPaths:
+    - ".github/workflows"
+
+osv:
+  enabled: true
+  failOnSeverity: high
