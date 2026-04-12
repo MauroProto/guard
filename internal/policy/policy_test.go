@@ -134,3 +134,46 @@ func TestApplyFailOn(t *testing.T) {
 		t.Fatal("low finding should not be blocking with failOn=high")
 	}
 }
+
+func TestAddPackageExceptionUpdatesExistingPackage(t *testing.T) {
+	cfg := &config.Config{
+		Exceptions: config.Exceptions{
+			Packages: []config.PackageException{
+				{
+					Name:      "lodash",
+					Reason:    "keep",
+					Allows:    []string{"build_script"},
+					ExpiresAt: "2026-12-31",
+				},
+				{
+					Name:      "sharp",
+					Reason:    "old reason",
+					Allows:    []string{"build_script"},
+					ExpiresAt: "2026-01-01",
+				},
+			},
+		},
+	}
+
+	expiry := time.Date(2026, 10, 12, 0, 0, 0, 0, time.UTC)
+	AddPackageException(cfg, "sharp", "new reason", expiry)
+
+	if len(cfg.Exceptions.Packages) != 2 {
+		t.Fatalf("expected existing package exception to be updated in place, got %d entries", len(cfg.Exceptions.Packages))
+	}
+
+	if cfg.Exceptions.Packages[0].Name != "lodash" {
+		t.Fatalf("expected unrelated exception to remain first, got %q", cfg.Exceptions.Packages[0].Name)
+	}
+
+	updated := cfg.Exceptions.Packages[1]
+	if updated.Name != "sharp" {
+		t.Fatalf("expected sharp exception to remain in place, got %q", updated.Name)
+	}
+	if updated.Reason != "new reason" {
+		t.Fatalf("expected reason to be updated, got %q", updated.Reason)
+	}
+	if updated.ExpiresAt != "2026-10-12" {
+		t.Fatalf("expected expiry to be updated, got %q", updated.ExpiresAt)
+	}
+}

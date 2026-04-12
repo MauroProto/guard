@@ -54,6 +54,9 @@ func TestDefaultWorkspace(t *testing.T) {
 	if ws.MinimumReleaseAge != 1440 {
 		t.Fatal("default minimumReleaseAge should be 1440")
 	}
+	if len(ws.Packages) != 1 || ws.Packages[0] != "packages/*" {
+		t.Fatalf("default packages should be [packages/*], got %v", ws.Packages)
+	}
 	if !ws.BlockExoticSubdeps {
 		t.Fatal("default blockExoticSubdeps should be true")
 	}

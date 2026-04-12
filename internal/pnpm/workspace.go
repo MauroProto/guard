@@ -26,6 +26,7 @@ type Workspace struct {
 // DefaultWorkspace returns a hardened pnpm-workspace.yaml configuration.
 func DefaultWorkspace() *Workspace {
 	return &Workspace{
+		Packages:                     []string{"packages/*"},
 		MinimumReleaseAge:            1440,
 		TrustPolicy:                  "no-downgrade",
 		TrustPolicyIgnoreAfter:       43200,

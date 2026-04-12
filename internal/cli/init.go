@@ -87,13 +87,15 @@ func runInit(args []string) error {
 		return nil
 	}
 
-	// Check existing
-	policyPath := filepath.Join(*root, ".guard", "policy.yaml")
+	// Check existing targets before writing anything.
 	if !*force {
-		if _, err := os.Stat(policyPath); err == nil {
-			ui.Warn(ui.T("init.already"))
-			ui.Newline()
-			return fmt.Errorf("%w: %s already exists (use --force)", ErrUsage, policyPath)
+		for _, f := range files {
+			path := filepath.Join(*root, f.rel)
+			if _, err := os.Stat(path); err == nil {
+				ui.Warn(ui.T("init.already"))
+				ui.Newline()
+				return fmt.Errorf("%w: %s already exists (use --force)", ErrUsage, path)
+			}
 		}
 	}
 
