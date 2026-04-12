@@ -75,9 +75,13 @@ func auditSingleWorkflow(root, path string) []model.Finding {
 			}
 		}
 
-		// Check for permissions block
-		if permissionsLine.MatchString(line) {
-			hasPermissions = true
+		// Check for top-level permissions block (0-1 leading spaces/tabs).
+		// Job-level permissions (indented 4+ spaces) should not count.
+		if m := permissionsLine.FindStringSubmatch(line); m != nil {
+			indent := len(line) - len(strings.TrimLeft(line, " \t"))
+			if indent <= 1 {
+				hasPermissions = true
+			}
 		}
 
 		// Check for broad write permissions

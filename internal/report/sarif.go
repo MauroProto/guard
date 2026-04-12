@@ -74,6 +74,9 @@ func SARIF(r *model.Report) ([]byte, error) {
 	var results []sarifResult
 
 	for _, f := range r.Findings {
+		if f.Muted {
+			continue
+		}
 		if _, exists := rulesMap[f.RuleID]; !exists {
 			rulesMap[f.RuleID] = sarifRule{
 				ID:               f.RuleID,

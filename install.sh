@@ -1,10 +1,10 @@
 #!/bin/sh
 # Guard installer — downloads and installs the guard binary.
-# Usage: curl -fsSL https://raw.githubusercontent.com/nori-mau/guard/main/install.sh | sh
+# Usage: curl -fsSL https://raw.githubusercontent.com/MauroProto/guard/main/install.sh | sh
 
 set -e
 
-REPO="nori-mau/guard"
+REPO="MauroProto/guard"
 BINARY="guard"
 INSTALL_DIR="/usr/local/bin"
 

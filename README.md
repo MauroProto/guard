@@ -17,19 +17,19 @@ Guard scans your JavaScript/TypeScript repositories for supply chain risks, enfo
 ### One-liner (macOS/Linux)
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/nori-mau/guard/main/install.sh | sh
+curl -fsSL https://raw.githubusercontent.com/MauroProto/guard/main/install.sh | sh
 ```
 
 ### With Go
 
 ```bash
-go install github.com/nori-mau/guard/cmd/guard@latest
+go install github.com/MauroProto/guard/cmd/guard@latest
 ```
 
 ### From source
 
 ```bash
-git clone https://github.com/nori-mau/guard.git
+git clone https://github.com/MauroProto/guard.git
 cd guard
 make install
 ```
@@ -59,7 +59,7 @@ guard init
 | `guard fix` | `guard f` | Auto-fix issues found by scan |
 | `guard init` | `guard i` | Create a secure baseline (policy, pnpm config, CI workflow) |
 | `guard ci` | `guard c` | Strict scan mode for CI pipelines |
-| `guard diff` | `guard d` | Compare two package versions for risk signals |
+| `guard diff` | `guard d` | Compare two local package versions for risk signals |
 | `guard approve` | `guard ab` | Approve a package that needs build scripts |
 
 ### Typical workflow
@@ -92,6 +92,14 @@ guard scan       # 3. Verify it's clean
 - Missing `CODEOWNERS` for workflow protection
 
 ### Package diff heuristics (`guard diff`)
+
+> **Note:** `guard diff` currently works with local directories only (`--from-dir`/`--to-dir`). Registry download is planned for a future release.
+
+```bash
+guard diff lodash@4.17.20..4.17.21 --from-dir old/ --to-dir new/
+```
+
+Detects:
 - New install scripts (postinstall, preinstall)
 - Remote fetch / command execution patterns
 - New binary files
@@ -159,7 +167,7 @@ jobs:
       - uses: actions/setup-go@<SHA>
         with:
           go-version: '1.23'
-      - run: go install github.com/nori-mau/guard/cmd/guard@latest
+      - run: go install github.com/MauroProto/guard/cmd/guard@latest
       - run: guard ci --format sarif --output guard.sarif
       - uses: github/codeql-action/upload-sarif@<SHA>
         if: always()
@@ -172,7 +180,7 @@ jobs:
 ## Development
 
 ```bash
-git clone https://github.com/nori-mau/guard.git
+git clone https://github.com/MauroProto/guard.git
 cd guard
 make build       # Build binary
 make test        # Run tests

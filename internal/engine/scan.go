@@ -145,16 +145,19 @@ func checkRepo(report *model.Report, cfg *config.Config, state *repo.State) {
 		})
 	}
 
-	if cfg.PNPM.RequireNodeEngine && state.PackageJSON != nil && len(state.PackageJSON.Engines) == 0 {
-		report.AddFinding(model.Finding{
-			RuleID:      "repo.nodeEngine.missing",
-			Severity:    model.SeverityLow,
-			Category:    model.CategoryRepo,
-			Title:       "Node engine is not declared",
-			Message:     "package.json does not define engines.node.",
-			Remediation: "Declare the minimum Node version.",
-			Command:     `npm pkg set "engines.node"=">=22"`,
-		})
+	if cfg.PNPM.RequireNodeEngine && state.PackageJSON != nil {
+		_, hasNode := state.PackageJSON.Engines["node"]
+		if !hasNode {
+			report.AddFinding(model.Finding{
+				RuleID:      "repo.nodeEngine.missing",
+				Severity:    model.SeverityLow,
+				Category:    model.CategoryRepo,
+				Title:       "Node engine is not declared",
+				Message:     "package.json does not define engines.node.",
+				Remediation: "Declare the minimum Node version.",
+				Command:     `npm pkg set "engines.node"=">=22"`,
+			})
+		}
 	}
 }
 
@@ -167,7 +170,6 @@ func checkPNPM(report *model.Report, cfg *config.Config, ws *pnpm.Workspace) {
 			Title:       "minimumReleaseAge is not configured",
 			Message:     "The workspace does not delay newly published releases.",
 			Remediation: "Set minimumReleaseAge to at least 1440 minutes.",
-			Command:     "guard init --force",
 		})
 	} else if ws.MinimumReleaseAge > 0 && ws.MinimumReleaseAge < cfg.PNPM.MinimumReleaseAgeMinutes {
 		report.AddFinding(model.Finding{
@@ -177,7 +179,6 @@ func checkPNPM(report *model.Report, cfg *config.Config, ws *pnpm.Workspace) {
 			Title:       "minimumReleaseAge is lower than policy",
 			Message:     fmt.Sprintf("Workspace value (%d min) is lower than policy (%d min).", ws.MinimumReleaseAge, cfg.PNPM.MinimumReleaseAgeMinutes),
 			Remediation: "Raise minimumReleaseAge in pnpm-workspace.yaml.",
-			Command:     fmt.Sprintf("guard init --force --minimum-release-age %d", cfg.PNPM.MinimumReleaseAgeMinutes),
 			Evidence:    map[string]any{"current": ws.MinimumReleaseAge, "required": cfg.PNPM.MinimumReleaseAgeMinutes},
 		})
 	}
@@ -190,7 +191,6 @@ func checkPNPM(report *model.Report, cfg *config.Config, ws *pnpm.Workspace) {
 			Title:       "Exotic transitive sources are not blocked",
 			Message:     "blockExoticSubdeps is disabled in pnpm-workspace.yaml.",
 			Remediation: "Enable blockExoticSubdeps in pnpm-workspace.yaml.",
-			Command:     "guard init --force",
 		})
 	}
 
@@ -202,7 +202,6 @@ func checkPNPM(report *model.Report, cfg *config.Config, ws *pnpm.Workspace) {
 			Title:       "Dependency build approval is not enforced",
 			Message:     "strictDepBuilds is disabled in pnpm-workspace.yaml.",
 			Remediation: "Enable strictDepBuilds in pnpm-workspace.yaml.",
-			Command:     "guard init --force",
 		})
 	}
 
@@ -214,7 +213,6 @@ func checkPNPM(report *model.Report, cfg *config.Config, ws *pnpm.Workspace) {
 			Title:       "Trust downgrade protection is not enabled",
 			Message:     "trustPolicy is not set to no-downgrade in pnpm-workspace.yaml.",
 			Remediation: "Enable trustPolicy: no-downgrade.",
-			Command:     "guard init --force",
 		})
 	}
 

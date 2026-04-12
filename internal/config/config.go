@@ -114,7 +114,7 @@ func Default() *Config {
 			WorkflowPaths:                []string{".github/workflows"},
 		},
 		OSV: OSV{
-			Enabled:        true,
+			Enabled:        false,
 			FailOnSeverity: "high",
 		},
 		Diff: Diff{

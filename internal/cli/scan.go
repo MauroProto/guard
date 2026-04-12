@@ -25,6 +25,7 @@ func runScan(args []string) error {
 	failOn := fs.String("fail-on", "", "minimum severity to block: low|medium|high|critical")
 	offline := fs.Bool("offline", false, "skip network-dependent checks")
 	noOSV := fs.Bool("no-osv", false, "skip OSV vulnerability lookup")
+	// Reserved flags: offline and noOSV are parsed but not yet wired to scan logic.
 	_ = offline
 	_ = noOSV
 

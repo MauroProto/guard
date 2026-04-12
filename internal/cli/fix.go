@@ -13,6 +13,7 @@ import (
 	"guard/internal/config"
 	"guard/internal/engine"
 	"guard/internal/model"
+	"guard/internal/pnpm"
 	"guard/internal/ui"
 )
 
@@ -73,6 +74,22 @@ func runFix(args []string) error {
 	var fixes []fixAction
 	var manual []fixAction
 
+	// Collect pnpm workspace settings findings (handled internally, not via shell)
+	var pnpmFindings []model.Finding
+	for _, f := range sorted {
+		if f.Muted {
+			continue
+		}
+		switch f.RuleID {
+		case "pnpm.minimumReleaseAge.missing",
+			"pnpm.minimumReleaseAge.too_low",
+			"pnpm.blockExoticSubdeps.disabled",
+			"pnpm.strictDepBuilds.disabled",
+			"pnpm.trustPolicy.disabled":
+			pnpmFindings = append(pnpmFindings, f)
+		}
+	}
+
 	for _, f := range sorted {
 		if f.Command == "" || f.Muted || seen[f.Command] {
 			continue
@@ -104,7 +121,9 @@ func runFix(args []string) error {
 		}
 	}
 
-	if len(fixes) == 0 && len(manual) == 0 {
+	totalFixes := len(fixes) + len(pnpmFindings)
+
+	if totalFixes == 0 && len(manual) == 0 {
 		ui.Info(ui.T("fix.no_auto"))
 		ui.Newline()
 		return nil
@@ -112,9 +131,39 @@ func runFix(args []string) error {
 
 	// Show plan
 	ui.Newline()
-	ui.SectionTitle(fmt.Sprintf("  %s %s (%d)", ui.IconRocket, ui.T("fix.plan"), len(fixes)))
+	ui.SectionTitle(fmt.Sprintf("  %s %s (%d)", ui.IconRocket, ui.T("fix.plan"), totalFixes))
 
-	for i, fix := range fixes {
+	stepNum := 0
+
+	// Show pnpm workspace patches in the plan
+	if len(pnpmFindings) > 0 {
+		stepNum++
+		hasBlocking := false
+		for _, f := range pnpmFindings {
+			if f.Blocking {
+				hasBlocking = true
+				break
+			}
+		}
+		marker := ui.Yellow
+		label := ui.T("scan.step_optional")
+		if hasBlocking {
+			marker = ui.Red
+			label = ui.T("scan.step_required")
+		}
+		fmt.Fprintf(os.Stderr, "  %s%s%d.%s %spatch pnpm-workspace.yaml%s  %s%s%s\n",
+			marker, ui.Bold, stepNum, ui.Reset,
+			ui.Yellow, ui.Reset,
+			ui.Dim, label, ui.Reset)
+		for _, f := range pnpmFindings {
+			fmt.Fprintf(os.Stderr, "     %s%s%s\n",
+				ui.Dim, f.Remediation, ui.Reset)
+		}
+		fmt.Fprintln(os.Stderr)
+	}
+
+	for _, fix := range fixes {
+		stepNum++
 		marker := ui.Yellow
 		label := ui.T("scan.step_optional")
 		if fix.blocking {
@@ -122,7 +171,7 @@ func runFix(args []string) error {
 			label = ui.T("scan.step_required")
 		}
 		fmt.Fprintf(os.Stderr, "  %s%s%d.%s %s$ %s%s  %s%s%s\n",
-			marker, ui.Bold, i+1, ui.Reset,
+			marker, ui.Bold, stepNum, ui.Reset,
 			ui.Yellow, fix.command, ui.Reset,
 			ui.Dim, label, ui.Reset)
 		fmt.Fprintf(os.Stderr, "     %s%s%s\n\n",
@@ -169,6 +218,26 @@ func runFix(args []string) error {
 
 	succeeded := 0
 	failed := 0
+
+	// Fix pnpm workspace settings directly (surgical patch, preserves existing config)
+	if len(pnpmFindings) > 0 {
+		pnpmFixed, pnpmErr := fixPNPMSettings(*root, pnpmFindings, cfg)
+		if pnpmErr != nil {
+			sp := ui.NewSpinner("pnpm-workspace.yaml")
+			ui.Pause(200 * time.Millisecond)
+			sp.StopFail(fmt.Sprintf("patch pnpm settings: %v", pnpmErr))
+			failed++
+		} else if len(pnpmFixed) > 0 {
+			sp := ui.NewSpinner("pnpm-workspace.yaml")
+			ui.Pause(300 * time.Millisecond)
+			sp.Stop()
+			for _, desc := range pnpmFixed {
+				fmt.Fprintf(os.Stderr, "     %s%s%s\n", ui.Dim, desc, ui.Reset)
+			}
+			fmt.Fprintln(os.Stderr)
+			succeeded++
+		}
+	}
 
 	for _, fix := range fixes {
 		sp := ui.NewSpinner(fix.command)
@@ -228,4 +297,42 @@ func runFix(args []string) error {
 		return ErrPolicy
 	}
 	return nil
+}
+
+// fixPNPMSettings loads pnpm-workspace.yaml, patches only the specific fields
+// that are broken according to the findings, and saves it back. This preserves
+// all existing configuration (packages, excludes, allowBuilds, etc.) unlike
+// "guard init --force" which overwrites the entire file.
+func fixPNPMSettings(root string, findings []model.Finding, cfg *config.Config) ([]string, error) {
+	ws, err := pnpm.Load(root)
+	if err != nil {
+		return nil, fmt.Errorf("load pnpm workspace: %w", err)
+	}
+
+	var fixed []string
+	for _, f := range findings {
+		switch f.RuleID {
+		case "pnpm.minimumReleaseAge.missing", "pnpm.minimumReleaseAge.too_low":
+			ws.MinimumReleaseAge = cfg.PNPM.MinimumReleaseAgeMinutes
+			fixed = append(fixed, fmt.Sprintf("minimumReleaseAge → %d", cfg.PNPM.MinimumReleaseAgeMinutes))
+		case "pnpm.blockExoticSubdeps.disabled":
+			ws.BlockExoticSubdeps = true
+			fixed = append(fixed, "blockExoticSubdeps → true")
+		case "pnpm.strictDepBuilds.disabled":
+			ws.StrictDepBuilds = true
+			fixed = append(fixed, "strictDepBuilds → true")
+		case "pnpm.trustPolicy.disabled":
+			ws.TrustPolicy = "no-downgrade"
+			fixed = append(fixed, "trustPolicy → no-downgrade")
+		}
+	}
+
+	if len(fixed) == 0 {
+		return nil, nil
+	}
+
+	if err := pnpm.Save(root, ws); err != nil {
+		return nil, fmt.Errorf("save pnpm workspace: %w", err)
+	}
+	return fixed, nil
 }
