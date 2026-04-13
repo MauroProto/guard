@@ -5,6 +5,8 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
+	"fmt"
 	"io"
 	"net/http"
 	"net/url"
@@ -54,17 +56,17 @@ func (r *HTTPRegistry) Version(ctx context.Context, name, version string) (*Vers
 	}
 	resp, err := r.Client.Do(req)
 	if err != nil {
-		return loadCachedMetadata(cachePath)
+		return loadCachedMetadataOr(cachePath, err)
 	}
 	defer resp.Body.Close()
 
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		return loadCachedMetadata(cachePath)
+		return loadCachedMetadataOr(cachePath, fmt.Errorf("registry returned %s for %s@%s", resp.Status, name, version))
 	}
 
 	body, err := io.ReadAll(resp.Body)
 	if err != nil {
-		return loadCachedMetadata(cachePath)
+		return loadCachedMetadataOr(cachePath, err)
 	}
 	_ = os.MkdirAll(r.CacheDir, 0o755)
 	_ = os.WriteFile(cachePath, body, 0o644)
@@ -77,6 +79,17 @@ func loadCachedMetadata(path string) (*VersionMetadata, error) {
 		return nil, err
 	}
 	return parseMetadata(b)
+}
+
+func loadCachedMetadataOr(path string, fallback error) (*VersionMetadata, error) {
+	meta, err := loadCachedMetadata(path)
+	if err == nil {
+		return meta, nil
+	}
+	if errors.Is(err, os.ErrNotExist) {
+		return nil, fallback
+	}
+	return nil, err
 }
 
 func parseMetadata(b []byte) (*VersionMetadata, error) {

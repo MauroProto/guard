@@ -118,6 +118,28 @@ func TestSARIFEmptyCollectionsMarshalAsArrays(t *testing.T) {
 	}
 }
 
+func TestJSONEmptyFindingsMarshalAsArray(t *testing.T) {
+	rep := &model.Report{
+		Tool:      "guard",
+		Version:   "dev",
+		Root:      "/tmp/test",
+		Timestamp: time.Date(2026, 4, 12, 0, 0, 0, 0, time.UTC),
+		Decision:  "pass",
+	}
+	b, err := JSON(rep)
+	if err != nil {
+		t.Fatalf("JSON marshal failed: %v", err)
+	}
+
+	var parsed map[string]any
+	if err := json.Unmarshal(b, &parsed); err != nil {
+		t.Fatalf("JSON is not valid JSON: %v", err)
+	}
+	if findings, ok := parsed["findings"].([]any); !ok || len(findings) != 0 {
+		t.Fatalf("expected findings to be an empty array, got %#v", parsed["findings"])
+	}
+}
+
 func TestTerminalOutput(t *testing.T) {
 	rep := fixtureReport()
 	out := Terminal(rep, true) // no color

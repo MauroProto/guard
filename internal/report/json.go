@@ -8,5 +8,10 @@ import (
 
 // JSON marshals the report to indented JSON.
 func JSON(r *model.Report) ([]byte, error) {
-	return json.MarshalIndent(r, "", "  ")
+	clone := *r
+	clone.Normalize()
+	if clone.Findings == nil {
+		clone.Findings = []model.Finding{}
+	}
+	return json.MarshalIndent(&clone, "", "  ")
 }

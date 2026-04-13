@@ -4,6 +4,7 @@ import (
 	"context"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 )
 
@@ -28,5 +29,28 @@ func TestHTTPRegistryVersion(t *testing.T) {
 	}
 	if meta.TarballURL == "" || meta.Integrity == "" {
 		t.Fatalf("expected tarball metadata, got %+v", meta)
+	}
+}
+
+func TestHTTPRegistryVersionNotFoundWithoutCacheReturnsRegistryError(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		http.NotFound(w, r)
+	}))
+	defer server.Close()
+
+	registry := &HTTPRegistry{
+		BaseURL:  server.URL,
+		Client:   server.Client(),
+		CacheDir: t.TempDir(),
+	}
+	_, err := registry.Version(context.Background(), "missing-pkg", "9.9.9")
+	if err == nil {
+		t.Fatal("expected registry query to fail")
+	}
+	if !strings.Contains(err.Error(), "404") {
+		t.Fatalf("expected error to mention 404, got %v", err)
+	}
+	if strings.Contains(err.Error(), "no such file or directory") {
+		t.Fatalf("expected registry error, got cache ENOENT: %v", err)
 	}
 }
