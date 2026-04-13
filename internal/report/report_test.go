@@ -6,7 +6,7 @@ import (
 	"testing"
 	"time"
 
-	"guard/internal/model"
+	"github.com/MauroProto/guard/internal/model"
 )
 
 func fixtureReport() *model.Report {
@@ -81,6 +81,40 @@ func TestSARIFStructure(t *testing.T) {
 	results := run["results"].([]any)
 	if len(results) != 2 {
 		t.Fatalf("expected 2 results, got %d", len(results))
+	}
+	tool := run["tool"].(map[string]any)
+	driver := tool["driver"].(map[string]any)
+	if driver["informationUri"] != "https://github.com/MauroProto/guard" {
+		t.Fatalf("expected canonical informationUri, got %v", driver["informationUri"])
+	}
+}
+
+func TestSARIFEmptyCollectionsMarshalAsArrays(t *testing.T) {
+	rep := &model.Report{
+		Tool:      "guard",
+		Version:   "dev",
+		Root:      "/tmp/test",
+		Timestamp: time.Date(2026, 4, 12, 0, 0, 0, 0, time.UTC),
+		Decision:  "pass",
+	}
+	b, err := SARIF(rep)
+	if err != nil {
+		t.Fatalf("SARIF marshal failed: %v", err)
+	}
+
+	var parsed map[string]any
+	if err := json.Unmarshal(b, &parsed); err != nil {
+		t.Fatalf("SARIF is not valid JSON: %v", err)
+	}
+	runs := parsed["runs"].([]any)
+	run := runs[0].(map[string]any)
+	if results, ok := run["results"].([]any); !ok || len(results) != 0 {
+		t.Fatalf("expected results to be an empty array, got %#v", run["results"])
+	}
+	tool := run["tool"].(map[string]any)
+	driver := tool["driver"].(map[string]any)
+	if rules, ok := driver["rules"].([]any); !ok || len(rules) != 0 {
+		t.Fatalf("expected rules to be an empty array, got %#v", driver["rules"])
 	}
 }
 

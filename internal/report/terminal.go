@@ -5,7 +5,7 @@ import (
 	"sort"
 	"strings"
 
-	"guard/internal/model"
+	"github.com/MauroProto/guard/internal/model"
 )
 
 // color codes

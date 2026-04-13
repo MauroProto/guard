@@ -4,14 +4,14 @@ import (
 	"fmt"
 	"strings"
 
-	"guard/internal/model"
+	"github.com/MauroProto/guard/internal/model"
 )
 
 // Target holds the parsed diff target.
 type Target struct {
-	Package string
-	From    string
-	To      string
+	Package string `json:"package"`
+	From    string `json:"from"`
+	To      string `json:"to"`
 }
 
 // ParseTarget parses a string like "axios@1.7.9..1.8.0" into a Target.
@@ -54,7 +54,7 @@ type DiffResult struct {
 
 // PackageContents represents the expanded contents of a package tarball.
 type PackageContents struct {
-	PackageJSON map[string]any   // parsed package.json
+	PackageJSON map[string]any    // parsed package.json
 	Files       map[string][]byte // relative path -> content
 	FileList    []string          // sorted list of file paths
 }

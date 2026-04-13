@@ -4,8 +4,9 @@ import (
 	"fmt"
 	"os"
 	"strings"
+	"sync"
 
-	"guard/internal/locale"
+	"github.com/MauroProto/guard/internal/locale"
 )
 
 // ANSI color/style codes — exported so CLI files can reference them directly.
@@ -45,9 +46,30 @@ const (
 )
 
 var noColorFlag bool
+var (
+	interactiveOnce sync.Once
+	interactiveTTY  bool
+)
 
 // SetNoColor disables ANSI color output.
 func SetNoColor(v bool) { noColorFlag = v }
+
+// Interactive reports whether the current stderr supports rich terminal output.
+func Interactive() bool {
+	interactiveOnce.Do(func() {
+		if os.Getenv("CI") != "" || os.Getenv("TERM") == "dumb" {
+			interactiveTTY = false
+			return
+		}
+		info, err := os.Stderr.Stat()
+		if err != nil {
+			interactiveTTY = false
+			return
+		}
+		interactiveTTY = (info.Mode() & os.ModeCharDevice) != 0
+	})
+	return interactiveTTY
+}
 
 // c returns the ANSI code, or empty string if no-color is set.
 func c(code string) string {

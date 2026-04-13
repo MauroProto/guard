@@ -12,15 +12,16 @@ jobs:
   guard:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@b4ffde65f46336ab88eb53be808477a3936bae11
+      - uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd
+      - uses: actions/setup-go@4a3601121dd01d1626a1e23e37211e3254c1c06c
+        with:
+          go-version-file: go.mod
       - name: Install Guard
-        run: |
-          # TODO: replace with actual install method once Guard is published
-          go install guard@latest
+        run: go install github.com/MauroProto/guard/cmd/guard@latest
       - name: Run Guard CI
         run: guard ci --format sarif --output guard.sarif
       - name: Upload SARIF
         if: always()
-        uses: github/codeql-action/upload-sarif@b611370bb5703a7efb587f9d136a52ea24c5c38c
+        uses: github/codeql-action/upload-sarif@d4b3ca9fa7f69d38bfcd667bdc45bc373d16277e
         with:
           sarif_file: guard.sarif

@@ -3,11 +3,11 @@ package engine
 import (
 	"time"
 
-	"guard/internal/model"
+	"github.com/MauroProto/guard/internal/model"
 )
 
 // Version is the current Guard release.
-const Version = "0.1.0"
+var Version = "dev"
 
 // NewReport creates a blank report for the given root.
 func NewReport(root string) *model.Report {

@@ -4,8 +4,8 @@ import (
 	"testing"
 	"time"
 
-	"guard/internal/config"
-	"guard/internal/model"
+	"github.com/MauroProto/guard/internal/config"
+	"github.com/MauroProto/guard/internal/model"
 )
 
 func TestRuleExceptionActive(t *testing.T) {

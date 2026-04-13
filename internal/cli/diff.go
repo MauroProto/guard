@@ -1,6 +1,7 @@
 package cli
 
 import (
+	"context"
 	"encoding/json"
 	"flag"
 	"fmt"
@@ -8,11 +9,11 @@ import (
 	"strings"
 	"time"
 
-	"guard/internal/config"
-	diffpkg "guard/internal/diff"
-	"guard/internal/engine"
-	"guard/internal/model"
-	"guard/internal/ui"
+	"github.com/MauroProto/guard/internal/config"
+	diffpkg "github.com/MauroProto/guard/internal/diff"
+	"github.com/MauroProto/guard/internal/engine"
+	"github.com/MauroProto/guard/internal/model"
+	"github.com/MauroProto/guard/internal/ui"
 )
 
 func runDiff(args []string) error {
@@ -100,10 +101,33 @@ func runDiff(args []string) error {
 		}
 	} else {
 		if interactive {
-			ui.Warn(ui.T("diff.no_registry"))
-			ui.Newline()
+			sp := ui.NewSpinner(fmt.Sprintf("Fetching %s@%s...", target.Package, target.From))
+			from, err = diffpkg.FetchPackageContents(context.Background(), *root, target.Package, target.From)
+			ui.Pause(300 * time.Millisecond)
+			if err != nil {
+				sp.StopFail(fmt.Sprintf("fetch %s@%s: %v", target.Package, target.From, err))
+				return err
+			}
+			sp.Stop()
+
+			sp = ui.NewSpinner(fmt.Sprintf("Fetching %s@%s...", target.Package, target.To))
+			to, err = diffpkg.FetchPackageContents(context.Background(), *root, target.Package, target.To)
+			ui.Pause(300 * time.Millisecond)
+			if err != nil {
+				sp.StopFail(fmt.Sprintf("fetch %s@%s: %v", target.Package, target.To, err))
+				return err
+			}
+			sp.Stop()
+		} else {
+			from, err = diffpkg.FetchPackageContents(context.Background(), *root, target.Package, target.From)
+			if err != nil {
+				return err
+			}
+			to, err = diffpkg.FetchPackageContents(context.Background(), *root, target.Package, target.To)
+			if err != nil {
+				return err
+			}
 		}
-		return fmt.Errorf("tarball download not yet available — use --from-dir and --to-dir for local comparison")
 	}
 
 	result := diffpkg.Compare(*target, from, to, suspiciousAPIs)

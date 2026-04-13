@@ -8,7 +8,7 @@ import (
 	"strings"
 	"unicode/utf8"
 
-	"guard/internal/model"
+	"github.com/MauroProto/guard/internal/model"
 )
 
 // installScriptKeys are the package.json scripts that run during install.
@@ -301,4 +301,3 @@ func checkStructuralChanges(from, to *PackageContents) []Signal {
 
 	return signals
 }
-

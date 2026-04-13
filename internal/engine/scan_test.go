@@ -2,11 +2,13 @@ package engine
 
 import (
 	"context"
+	"os"
 	"path/filepath"
 	"testing"
 
-	"guard/internal/config"
-	"guard/internal/model"
+	"github.com/MauroProto/guard/internal/config"
+	"github.com/MauroProto/guard/internal/model"
+	"github.com/MauroProto/guard/internal/pnpm"
 )
 
 func TestScanHealthyRepo(t *testing.T) {
@@ -109,5 +111,64 @@ func TestScoreMutedFindingsExcluded(t *testing.T) {
 	s := score(findings)
 	if s != 8 {
 		t.Fatalf("expected score 8 (muted high excluded), got %d", s)
+	}
+}
+
+func TestScanWorkspacePackages(t *testing.T) {
+	root := t.TempDir()
+	if err := os.WriteFile(filepath.Join(root, "pnpm-workspace.yaml"), []byte("packages:\n  - apps/*\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(root, "pnpm-lock.yaml"), []byte("lockfileVersion: '9.0'\npackages: {}\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(filepath.Join(root, "apps", "web"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(root, "apps", "web", "package.json"), []byte(`{"name":"web-app"}`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	cfg := config.Default()
+	rep, err := ScanRepo(context.Background(), root, cfg, &ScanOptions{DisableOSV: true})
+	if err != nil {
+		t.Fatalf("scan failed: %v", err)
+	}
+
+	var foundPackageManager bool
+	var foundNodeEngine bool
+	for _, finding := range rep.Findings {
+		if finding.File == "apps/web/package.json" && finding.RuleID == "repo.packageManager.unpinned" {
+			foundPackageManager = true
+		}
+		if finding.File == "apps/web/package.json" && finding.RuleID == "repo.nodeEngine.missing" {
+			foundNodeEngine = true
+		}
+	}
+	if !foundPackageManager || !foundNodeEngine {
+		t.Fatalf("expected workspace package findings, got %+v", rep.Findings)
+	}
+}
+
+func TestUnreviewedBuildWithUnsafePackageNameStaysManual(t *testing.T) {
+	cfg := config.Default()
+	ws := &pnpm.Workspace{
+		MinimumReleaseAge:  cfg.PNPM.MinimumReleaseAgeMinutes,
+		BlockExoticSubdeps: true,
+		StrictDepBuilds:    true,
+		TrustPolicy:        cfg.PNPM.TrustPolicy,
+		AllowBuilds: map[string]bool{
+			"bad;touch /tmp/pwned": false,
+		},
+	}
+	report := NewReport(".")
+	checkPNPM(report, cfg, ws)
+
+	if len(report.Findings) != 1 {
+		t.Fatalf("expected 1 finding, got %d", len(report.Findings))
+	}
+	action := report.Findings[0].PrimaryAction()
+	if action == nil || action.Type != model.ActionTypeManual {
+		t.Fatalf("expected manual action, got %+v", action)
 	}
 }

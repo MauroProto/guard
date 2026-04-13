@@ -1,13 +1,14 @@
 BINARY   := guard
-MODULE   := guard
-VERSION  := 0.1.0
-GOFLAGS  := -trimpath -ldflags="-s -w"
+MODULE   := github.com/MauroProto/guard
+VERSION  ?= dev
+GOFLAGS  := -trimpath
+LDFLAGS  := -s -w -X $(MODULE)/internal/engine.Version=$(VERSION)
 
 .PHONY: build test install clean vet
 
 ## build: Compile the binary
 build:
-	go build $(GOFLAGS) -o $(BINARY) ./cmd/guard/
+	go build $(GOFLAGS) -ldflags "$(LDFLAGS)" -o $(BINARY) ./cmd/guard/
 
 ## test: Run all tests
 test:
@@ -23,7 +24,7 @@ vet:
 
 ## install: Install to GOPATH/bin
 install:
-	go install $(GOFLAGS) ./cmd/guard/
+	go install $(GOFLAGS) -ldflags "$(LDFLAGS)" ./cmd/guard/
 
 ## clean: Remove build artifacts
 clean:

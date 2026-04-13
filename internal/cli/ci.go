@@ -9,10 +9,10 @@ import (
 	"strings"
 	"time"
 
-	"guard/internal/config"
-	"guard/internal/engine"
-	"guard/internal/report"
-	"guard/internal/ui"
+	"github.com/MauroProto/guard/internal/config"
+	"github.com/MauroProto/guard/internal/engine"
+	"github.com/MauroProto/guard/internal/report"
+	"github.com/MauroProto/guard/internal/ui"
 )
 
 func runCI(args []string) error {

@@ -1,4 +1,4 @@
-module guard
+module github.com/MauroProto/guard
 
 go 1.23.0
 

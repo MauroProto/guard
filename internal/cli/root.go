@@ -5,9 +5,9 @@ import (
 	"fmt"
 	"os"
 
-	"guard/internal/engine"
-	"guard/internal/locale"
-	"guard/internal/ui"
+	"github.com/MauroProto/guard/internal/engine"
+	"github.com/MauroProto/guard/internal/locale"
+	"github.com/MauroProto/guard/internal/ui"
 )
 
 var (

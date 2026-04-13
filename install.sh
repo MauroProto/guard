@@ -42,7 +42,7 @@ info "Detected: ${OS}/${ARCH}"
 
 # Check if Go is available (preferred method)
 if command -v go > /dev/null 2>&1; then
-    info "Go found — installing via go install..."
+info "Go found — installing via go install..."
     go install "github.com/${REPO}/cmd/guard@latest" 2>&1
 
     # Check if GOPATH/bin is in PATH
@@ -63,12 +63,16 @@ fi
 info "Go not found — downloading pre-built binary..."
 
 RELEASE_URL="https://github.com/${REPO}/releases/latest/download/guard-${OS}-${ARCH}"
+CHECKSUM_URL="https://github.com/${REPO}/releases/latest/download/guard-checksums.txt"
 TMP=$(mktemp)
+CHECKSUM_TMP=$(mktemp)
 
 if command -v curl > /dev/null 2>&1; then
     curl -fsSL "$RELEASE_URL" -o "$TMP" 2>/dev/null
+    curl -fsSL "$CHECKSUM_URL" -o "$CHECKSUM_TMP" 2>/dev/null || true
 elif command -v wget > /dev/null 2>&1; then
     wget -q "$RELEASE_URL" -O "$TMP" 2>/dev/null
+    wget -q "$CHECKSUM_URL" -O "$CHECKSUM_TMP" 2>/dev/null || true
 else
     fail "Neither curl nor wget found."
 fi
@@ -76,6 +80,7 @@ fi
 if [ ! -s "$TMP" ]; then
     # No pre-built binary yet — guide to install Go
     rm -f "$TMP"
+    rm -f "$CHECKSUM_TMP"
     printf "\n  ${DIM}Pre-built binaries not available yet.${RESET}\n"
     printf "  ${DIM}Install Go first, then run:${RESET}\n\n"
     printf "  ${CYAN}go install github.com/${REPO}/cmd/guard@latest${RESET}\n\n"
@@ -90,6 +95,23 @@ fi
 
 chmod +x "$TMP"
 
+if [ -s "$CHECKSUM_TMP" ]; then
+    EXPECTED=$(grep "  guard-${OS}-${ARCH}\$" "$CHECKSUM_TMP" | awk '{print $1}')
+    if [ -n "$EXPECTED" ]; then
+        if command -v shasum > /dev/null 2>&1; then
+            ACTUAL=$(shasum -a 256 "$TMP" | awk '{print $1}')
+        elif command -v sha256sum > /dev/null 2>&1; then
+            ACTUAL=$(sha256sum "$TMP" | awk '{print $1}')
+        else
+            ACTUAL=""
+        fi
+        if [ -n "$ACTUAL" ] && [ "$ACTUAL" != "$EXPECTED" ]; then
+            rm -f "$TMP" "$CHECKSUM_TMP"
+            fail "Checksum verification failed."
+        fi
+    fi
+fi
+
 # Try /usr/local/bin, fall back to ~/bin
 if [ -w "$INSTALL_DIR" ]; then
     mv "$TMP" "${INSTALL_DIR}/${BINARY}"
@@ -101,3 +123,4 @@ else
 fi
 
 printf "\n  ${GREEN}${BOLD}Done!${RESET} Run ${CYAN}guard${RESET} to get started.\n\n"
+rm -f "$CHECKSUM_TMP"

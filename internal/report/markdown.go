@@ -4,7 +4,7 @@ import (
 	"fmt"
 	"strings"
 
-	"guard/internal/model"
+	"github.com/MauroProto/guard/internal/model"
 )
 
 // Markdown renders a report as a GitHub-flavored Markdown table.

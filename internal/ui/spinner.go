@@ -16,6 +16,7 @@ type Spinner struct {
 	done   chan struct{}
 	wg     sync.WaitGroup
 	result string
+	noop   bool
 }
 
 // NewSpinner creates and starts a spinner with the given message.
@@ -23,6 +24,10 @@ func NewSpinner(msg string) *Spinner {
 	s := &Spinner{
 		msg:  msg,
 		done: make(chan struct{}),
+	}
+	if !Interactive() {
+		s.noop = true
+		return s
 	}
 	s.wg.Add(1)
 	go s.run()
@@ -49,6 +54,10 @@ func (s *Spinner) run() {
 
 // Stop stops the spinner and shows a success check.
 func (s *Spinner) Stop() {
+	if s.noop {
+		Success(s.msg)
+		return
+	}
 	close(s.done)
 	s.wg.Wait()
 	fmt.Fprintf(os.Stderr, "\r  %s%s%s %s%s\n", c(Green), IconCheck, c(Reset), s.msg, clearLine())
@@ -56,6 +65,13 @@ func (s *Spinner) Stop() {
 
 // StopFail stops the spinner and shows a failure cross.
 func (s *Spinner) StopFail(msg string) {
+	if s.noop {
+		if msg == "" {
+			msg = s.msg
+		}
+		Fail(msg)
+		return
+	}
 	close(s.done)
 	s.wg.Wait()
 	if msg != "" {
@@ -67,6 +83,13 @@ func (s *Spinner) StopFail(msg string) {
 
 // StopWarn stops the spinner and shows a warning.
 func (s *Spinner) StopWarn(msg string) {
+	if s.noop {
+		if msg == "" {
+			msg = s.msg
+		}
+		Warn(msg)
+		return
+	}
 	close(s.done)
 	s.wg.Wait()
 	if msg != "" {
@@ -82,5 +105,8 @@ func clearLine() string {
 
 // Pause adds a small delay for visual pacing.
 func Pause(d time.Duration) {
+	if !Interactive() {
+		return
+	}
 	time.Sleep(d)
 }

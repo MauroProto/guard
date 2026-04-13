@@ -3,7 +3,7 @@ package policy
 import (
 	"time"
 
-	"guard/internal/config"
+	"github.com/MauroProto/guard/internal/config"
 )
 
 // AddPackageException appends a package exception to the config.

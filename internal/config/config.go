@@ -5,6 +5,7 @@ import (
 	"os"
 	"path/filepath"
 
+	"github.com/MauroProto/guard/internal/yamlutil"
 	"gopkg.in/yaml.v3"
 )
 
@@ -111,7 +112,7 @@ func Default() *Config {
 			RequirePinnedActions:          true,
 			RequireReadOnlyDefaultToken:   true,
 			RequireCodeownersForWorkflows: true,
-			WorkflowPaths:                []string{".github/workflows"},
+			WorkflowPaths:                 []string{".github/workflows"},
 		},
 		OSV: OSV{
 			Enabled:        false,
@@ -164,7 +165,18 @@ func Save(root, path string, cfg *Config) error {
 	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
 		return err
 	}
-	out, err := yaml.Marshal(cfg)
+	desired, err := yamlutil.NewDocument(cfg)
+	if err != nil {
+		return err
+	}
+	doc := desired
+	if existing, err := yamlutil.LoadDocument(path); err == nil {
+		yamlutil.MergeDocuments(existing, desired)
+		doc = existing
+	} else if !os.IsNotExist(err) {
+		return err
+	}
+	out, err := yamlutil.MarshalDocument(doc)
 	if err != nil {
 		return err
 	}

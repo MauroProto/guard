@@ -4,7 +4,7 @@ import (
 	"path/filepath"
 	"testing"
 
-	"guard/internal/model"
+	"github.com/MauroProto/guard/internal/model"
 )
 
 func TestParseTarget(t *testing.T) {
@@ -131,5 +131,14 @@ func TestCompareWithFixtures(t *testing.T) {
 	}
 	if !hasCritical {
 		t.Fatal("expected at least one critical signal from fixture")
+	}
+}
+
+func TestCompareUsesEmptySignalsSliceWhenClean(t *testing.T) {
+	from := &PackageContents{Files: map[string][]byte{}}
+	to := &PackageContents{Files: map[string][]byte{}}
+	result := Compare(Target{Package: "test", From: "1.0.0", To: "1.0.0"}, from, to, nil)
+	if result.Signals == nil {
+		t.Fatal("expected empty slice, got nil")
 	}
 }

@@ -7,21 +7,23 @@ import (
 	"path/filepath"
 	"time"
 
-	"guard/internal/config"
-	"guard/internal/engine"
-	"guard/internal/pnpm"
-	"guard/internal/templates"
-	"guard/internal/ui"
+	"github.com/MauroProto/guard/internal/config"
+	"github.com/MauroProto/guard/internal/engine"
+	"github.com/MauroProto/guard/internal/pnpm"
+	"github.com/MauroProto/guard/internal/templates"
+	"github.com/MauroProto/guard/internal/ui"
 )
 
 func runInit(args []string) error {
 	fs := flag.NewFlagSet("init", flag.ContinueOnError)
 	root := fs.String("root", ".", "repository root")
 	dryRun := fs.Bool("dry-run", false, "preview changes without writing")
-	force := fs.Bool("force", false, "overwrite existing files")
+	force := fs.Bool("force", false, "overwrite generated template files")
 	preset := fs.String("preset", "balanced", "security preset: strict|balanced|local")
 	minAge := fs.Int("minimum-release-age", 0, "minimum release age in minutes (overrides preset)")
 	orgScope := fs.String("org-scope", "", "org scope to exclude from release age (e.g. @myorg/*)")
+	addCI := fs.Bool("add-ci", false, "create .github/workflows/guard-ci.yml")
+	withAIDocs := fs.Bool("with-ai-docs", false, "create AGENTS.md and CLAUDE.md")
 	noColor := fs.Bool("no-color", false, "disable colored output")
 	if err := fs.Parse(args); err != nil {
 		return fmt.Errorf("%w: %v", ErrUsage, err)
@@ -33,9 +35,8 @@ func runInit(args []string) error {
 
 	ui.Header(engine.Version)
 
-	// Step 1: Load preset
 	sp := ui.NewSpinner(fmt.Sprintf("Loading preset: %s...", *preset))
-	cfg, err := config.Preset(*preset)
+	presetCfg, err := config.Preset(*preset)
 	ui.Pause(400 * time.Millisecond)
 	if err != nil {
 		sp.StopFail(fmt.Sprintf("%v", err))
@@ -44,52 +45,57 @@ func runInit(args []string) error {
 	sp.Stop()
 
 	if *minAge > 0 {
-		cfg.PNPM.MinimumReleaseAgeMinutes = *minAge
+		presetCfg.PNPM.MinimumReleaseAgeMinutes = *minAge
 	}
 	if *orgScope != "" {
-		cfg.PNPM.MinimumReleaseAgeExclude = append(cfg.PNPM.MinimumReleaseAgeExclude, *orgScope)
+		presetCfg.PNPM.MinimumReleaseAgeExclude = appendUnique(presetCfg.PNPM.MinimumReleaseAgeExclude, *orgScope)
 	}
 
-	ws := pnpm.DefaultWorkspace()
-	ws.MinimumReleaseAge = cfg.PNPM.MinimumReleaseAgeMinutes
-	if *orgScope != "" {
-		ws.MinimumReleaseAgeExclude = append(ws.MinimumReleaseAgeExclude, *orgScope)
+	cfg, err := config.Load(*root, "")
+	if err != nil {
+		return err
 	}
+	applyPresetConfig(cfg, presetCfg)
 
-	files := []struct {
+	ws, err := loadOrDefaultWorkspace(*root)
+	if err != nil {
+		return err
+	}
+	applyPresetWorkspace(ws, cfg.PNPM)
+
+	templateFiles := []struct {
 		rel  string
 		icon string
 		data func() ([]byte, error)
-	}{
-		{".guard/policy.yaml", "🔒", func() ([]byte, error) { return config.MarshalYAML(cfg) }},
-		{"pnpm-workspace.yaml", "📦", func() ([]byte, error) { return pnpm.MarshalYAML(ws) }},
-		{".github/workflows/guard-ci.yml", "⚙️ ", func() ([]byte, error) { return templates.GuardCI() }},
-		{"AGENTS.md", "📄", func() ([]byte, error) { return templates.Agents() }},
-		{"CLAUDE.md", "🤖", func() ([]byte, error) { return templates.Claude() }},
+	}{}
+	if *addCI {
+		templateFiles = append(templateFiles, struct {
+			rel  string
+			icon string
+			data func() ([]byte, error)
+		}{
+			rel:  ".github/workflows/guard-ci.yml",
+			icon: "⚙️ ",
+			data: templates.GuardCI,
+		})
+	}
+	if *withAIDocs {
+		templateFiles = append(templateFiles,
+			struct {
+				rel  string
+				icon string
+				data func() ([]byte, error)
+			}{rel: "AGENTS.md", icon: "📄", data: templates.Agents},
+			struct {
+				rel  string
+				icon string
+				data func() ([]byte, error)
+			}{rel: "CLAUDE.md", icon: "🤖", data: templates.Claude},
+		)
 	}
 
-	if *dryRun {
-		ui.Info("Dry run — no files will be written")
-		ui.Newline()
-		for _, f := range files {
-			path := filepath.Join(*root, f.rel)
-			if _, err := os.Stat(path); err == nil {
-				ui.FileSkipped(f.icon + " " + f.rel)
-			} else {
-				ui.FileWouldCreate(f.icon + " " + f.rel)
-			}
-			ui.Pause(150 * time.Millisecond)
-		}
-		ui.Divider()
-		ui.Newline()
-		ui.Info(ui.T("init.done_dryrun"))
-		ui.Newline()
-		return nil
-	}
-
-	// Check existing targets before writing anything.
 	if !*force {
-		for _, f := range files {
+		for _, f := range templateFiles {
 			path := filepath.Join(*root, f.rel)
 			if _, err := os.Stat(path); err == nil {
 				ui.Warn(ui.T("init.already"))
@@ -99,13 +105,34 @@ func runInit(args []string) error {
 		}
 	}
 
-	// Step 2: Generate files one by one
-	sp = ui.NewSpinner("Generating secure baseline...")
-	ui.Pause(300 * time.Millisecond)
-	sp.Stop()
+	if *dryRun {
+		ui.Info("Dry run — no files will be written")
+		ui.Newline()
+		reportInitTarget(*root, ".guard/policy.yaml")
+		reportInitTarget(*root, "pnpm-workspace.yaml")
+		for _, f := range templateFiles {
+			reportInitTarget(*root, f.rel)
+			ui.Pause(150 * time.Millisecond)
+		}
+		ui.Divider()
+		ui.Newline()
+		ui.Info(ui.T("init.done_dryrun"))
+		ui.Newline()
+		return nil
+	}
 
 	ui.Newline()
-	for _, f := range files {
+	ui.NewSpinner("Updating .guard/policy.yaml").Stop()
+	if err := config.Save(*root, "", cfg); err != nil {
+		return err
+	}
+
+	ui.NewSpinner("Updating pnpm-workspace.yaml").Stop()
+	if err := pnpm.Save(*root, ws); err != nil {
+		return err
+	}
+
+	for _, f := range templateFiles {
 		sp = ui.NewSpinner(f.icon + " " + f.rel)
 		data, err := f.data()
 		if err != nil {
@@ -121,15 +148,89 @@ func runInit(args []string) error {
 			sp.StopFail(err.Error())
 			return err
 		}
-		ui.Pause(300 * time.Millisecond)
+		ui.Pause(250 * time.Millisecond)
 		sp.Stop()
 	}
 
-	// Result
 	ui.Divider()
 	ui.Newline()
 	ui.Success(ui.T("init.done"))
 	ui.Hint(ui.T("help.hint_scan"))
 	ui.Newline()
 	return nil
+}
+
+func applyPresetConfig(dst, preset *config.Config) {
+	if dst.Project.Name == "" {
+		dst.Project.Name = preset.Project.Name
+	}
+	dst.Version = preset.Version
+	dst.Project.Ecosystem = preset.Project.Ecosystem
+	dst.Project.PackageManager = preset.Project.PackageManager
+	dst.Enforcement = preset.Enforcement
+	dst.PNPM = preset.PNPM
+	dst.GitHub = preset.GitHub
+	dst.OSV = preset.OSV
+	dst.Diff = preset.Diff
+}
+
+func loadOrDefaultWorkspace(root string) (*pnpm.Workspace, error) {
+	ws, err := pnpm.Load(root)
+	if err == nil {
+		return ws, nil
+	}
+	if os.IsNotExist(err) {
+		return pnpm.DefaultWorkspace(), nil
+	}
+	return nil, err
+}
+
+func applyPresetWorkspace(ws *pnpm.Workspace, cfg config.PNPM) {
+	defaults := pnpm.DefaultWorkspace()
+	if len(ws.Packages) == 0 {
+		ws.Packages = append([]string(nil), defaults.Packages...)
+	}
+	if ws.MinimumReleaseAge < cfg.MinimumReleaseAgeMinutes {
+		ws.MinimumReleaseAge = cfg.MinimumReleaseAgeMinutes
+	}
+	ws.MinimumReleaseAgeExclude = appendUnique(ws.MinimumReleaseAgeExclude, cfg.MinimumReleaseAgeExclude...)
+	if cfg.TrustPolicy == "no-downgrade" {
+		ws.TrustPolicy = cfg.TrustPolicy
+	}
+	if cfg.BlockExoticSubdeps {
+		ws.BlockExoticSubdeps = true
+	}
+	if cfg.StrictDepBuilds {
+		ws.StrictDepBuilds = true
+	}
+	if ws.AllowBuilds == nil {
+		ws.AllowBuilds = map[string]bool{}
+	}
+	ws.PackageManagerStrict = true
+	ws.ManagePackageManagerVersions = true
+	if ws.TrustPolicyIgnoreAfter == 0 {
+		ws.TrustPolicyIgnoreAfter = defaults.TrustPolicyIgnoreAfter
+	}
+}
+
+func reportInitTarget(root, rel string) {
+	path := filepath.Join(root, rel)
+	if _, err := os.Stat(path); err == nil {
+		ui.FileSkipped(rel + " (patched)")
+	} else {
+		ui.FileWouldCreate(rel)
+	}
+}
+
+func appendUnique(values []string, extras ...string) []string {
+	seen := map[string]bool{}
+	result := make([]string, 0, len(values)+len(extras))
+	for _, value := range append(values, extras...) {
+		if value == "" || seen[value] {
+			continue
+		}
+		seen[value] = true
+		result = append(result, value)
+	}
+	return result
 }

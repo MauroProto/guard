@@ -1,6 +1,6 @@
 package diff
 
-import "guard/internal/model"
+import "github.com/MauroProto/guard/internal/model"
 
 // Compare runs all heuristics against two package versions and returns a DiffResult.
 func Compare(target Target, from, to *PackageContents, suspiciousAPIs []string) *DiffResult {
@@ -17,6 +17,9 @@ func Compare(target Target, from, to *PackageContents, suspiciousAPIs []string) 
 	var signals []Signal
 	for _, h := range heuristics {
 		signals = append(signals, h(from, to)...)
+	}
+	if signals == nil {
+		signals = []Signal{}
 	}
 
 	return &DiffResult{

@@ -3,7 +3,7 @@ package report
 import (
 	"encoding/json"
 
-	"guard/internal/model"
+	"github.com/MauroProto/guard/internal/model"
 )
 
 // SARIF types for the 2.1.0 spec subset used by GitHub Code Scanning.
@@ -41,10 +41,10 @@ type sarifConfig struct {
 }
 
 type sarifResult struct {
-	RuleID    string           `json:"ruleId"`
-	Level     string           `json:"level"`
-	Message   sarifMessage     `json:"message"`
-	Locations []sarifLocation  `json:"locations,omitempty"`
+	RuleID    string          `json:"ruleId"`
+	Level     string          `json:"level"`
+	Message   sarifMessage    `json:"message"`
+	Locations []sarifLocation `json:"locations,omitempty"`
 }
 
 type sarifMessage struct {
@@ -70,8 +70,9 @@ type sarifRegion struct {
 
 // SARIF converts a Guard report to SARIF 2.1.0 format.
 func SARIF(r *model.Report) ([]byte, error) {
+	r.Normalize()
 	rulesMap := map[string]sarifRule{}
-	var results []sarifResult
+	results := make([]sarifResult, 0, len(r.Findings))
 
 	for _, f := range r.Findings {
 		if f.Muted {
@@ -106,7 +107,7 @@ func SARIF(r *model.Report) ([]byte, error) {
 		results = append(results, result)
 	}
 
-	var rules []sarifRule
+	rules := make([]sarifRule, 0, len(rulesMap))
 	for _, rule := range rulesMap {
 		rules = append(rules, rule)
 	}
@@ -118,7 +119,7 @@ func SARIF(r *model.Report) ([]byte, error) {
 			Tool: sarifTool{
 				Driver: sarifDriver{
 					Name:            "guard",
-					InformationURI:  "https://github.com/user/guard",
+					InformationURI:  "https://github.com/MauroProto/guard",
 					SemanticVersion: r.Version,
 					Rules:           rules,
 				},

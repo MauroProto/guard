@@ -3,8 +3,8 @@ package policy
 import (
 	"time"
 
-	"guard/internal/config"
-	"guard/internal/model"
+	"github.com/MauroProto/guard/internal/config"
+	"github.com/MauroProto/guard/internal/model"
 )
 
 // RuleExceptionActive returns true if the exception has not expired.

@@ -2,7 +2,7 @@
 
 **Supply chain security CLI for pnpm projects.**
 
-Guard scans your JavaScript/TypeScript repositories for supply chain risks, enforces security policies, and auto-fixes issues — all from the terminal.
+Guard scans your JavaScript/TypeScript repositories for supply chain risks, enforces security policies, and applies safe local remediations from the terminal.
 
 <p align="center">
   <img src="https://img.shields.io/badge/go-%3E%3D1.23-blue" alt="Go 1.23+">
@@ -42,10 +42,10 @@ make install
 # Scan your repo
 guard scan
 
-# Auto-fix everything
+# Apply safe local remediations
 guard fix
 
-# Set up secure baseline from scratch
+# Set up a secure baseline
 guard init
 ```
 
@@ -57,7 +57,7 @@ guard init
 |---------|-------|-------------|
 | `guard scan` | `guard s` | Scan the repository for security issues |
 | `guard fix` | `guard f` | Auto-fix issues found by scan |
-| `guard init` | `guard i` | Create a secure baseline (policy, pnpm config, CI workflow) |
+| `guard init` | `guard i` | Create or patch a secure baseline (policy + pnpm config by default) |
 | `guard ci` | `guard c` | Strict scan mode for CI pipelines |
 | `guard diff` | `guard d` | Compare two local package versions for risk signals |
 | `guard approve` | `guard ab` | Approve a package that needs build scripts |
@@ -66,7 +66,7 @@ guard init
 
 ```bash
 guard scan       # 1. See what's wrong
-guard fix        # 2. Fix everything
+guard fix        # 2. Apply safe local remediations
 guard scan       # 3. Verify it's clean
 ```
 
@@ -93,9 +93,8 @@ guard scan       # 3. Verify it's clean
 
 ### Package diff heuristics (`guard diff`)
 
-> **Note:** `guard diff` currently works with local directories only (`--from-dir`/`--to-dir`). Registry download is planned for a future release.
-
 ```bash
+guard diff lodash@4.17.20..4.17.21
 guard diff lodash@4.17.20..4.17.21 --from-dir old/ --to-dir new/
 ```
 
@@ -136,6 +135,8 @@ guard --lang es scan    # Force Spanish
 guard init --preset strict      # 72h release age, blocks medium+
 guard init --preset balanced    # 24h release age, blocks high+ (default)
 guard init --preset local       # 1h release age, blocks critical only
+guard init --add-ci             # Also write .github/workflows/guard-ci.yml
+guard init --with-ai-docs       # Also write AGENTS.md and CLAUDE.md
 ```
 
 ---

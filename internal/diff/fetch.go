@@ -1,23 +1,53 @@
 package diff
 
 import (
+	"archive/tar"
+	"compress/gzip"
 	"context"
+	"crypto/sha256"
+	"crypto/sha512"
+	"encoding/base64"
 	"encoding/json"
 	"fmt"
+	"io"
+	"net/http"
 	"os"
 	"path/filepath"
 	"sort"
+	"strings"
+	"time"
+
+	"github.com/MauroProto/guard/internal/cache"
+	"github.com/MauroProto/guard/internal/npm"
 )
 
 // FetchPackageContents downloads and expands a package tarball from the registry.
-// TODO: implement actual tarball download from npm registry.
-// The implementation should:
-// 1. Call registry.Version(ctx, name, version) to get tarball URL
-// 2. Download the tarball to cache directory
-// 3. Extract and return PackageContents
-func FetchPackageContents(ctx context.Context, name, version string) (*PackageContents, error) {
-	_ = ctx
-	return nil, fmt.Errorf("tarball download not yet implemented for %s@%s — use --from-dir/--to-dir for local comparison", name, version)
+func FetchPackageContents(ctx context.Context, root, name, version string) (*PackageContents, error) {
+	registry := npm.NewClient(root)
+	meta, err := registry.Version(ctx, name, version)
+	if err != nil {
+		return nil, fmt.Errorf("load registry metadata for %s@%s: %w", name, version, err)
+	}
+
+	cacheDir := cache.Dir(root, "diff")
+	if err := os.MkdirAll(cacheDir, 0o755); err != nil {
+		return nil, err
+	}
+
+	tarballPath := filepath.Join(cacheDir, tarballCacheKey(name, version)+".tgz")
+	if _, err := os.Stat(tarballPath); os.IsNotExist(err) {
+		if err := downloadTarball(ctx, meta.TarballURL, tarballPath); err != nil {
+			return nil, err
+		}
+	}
+
+	if meta.Integrity != "" {
+		if err := verifyIntegrity(tarballPath, meta.Integrity); err != nil {
+			return nil, err
+		}
+	}
+
+	return extractTarball(tarballPath)
 }
 
 // LoadLocalContents reads package contents from a local directory.
@@ -26,7 +56,6 @@ func LoadLocalContents(dir string) (*PackageContents, error) {
 		Files: make(map[string][]byte),
 	}
 
-	// Read package.json if it exists
 	pkgPath := filepath.Join(dir, "package.json")
 	if b, err := os.ReadFile(pkgPath); err == nil {
 		var pkg map[string]any
@@ -35,7 +64,6 @@ func LoadLocalContents(dir string) (*PackageContents, error) {
 		}
 	}
 
-	// Walk directory and collect files
 	err := filepath.Walk(dir, func(path string, info os.FileInfo, err error) error {
 		if err != nil {
 			return err
@@ -66,4 +94,134 @@ func LoadLocalContents(dir string) (*PackageContents, error) {
 
 	sort.Strings(pc.FileList)
 	return pc, nil
+}
+
+func downloadTarball(ctx context.Context, tarballURL, dest string) error {
+	client := &http.Client{Timeout: 15 * time.Second}
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, tarballURL, nil)
+	if err != nil {
+		return err
+	}
+	resp, err := client.Do(req)
+	if err != nil {
+		return err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		return fmt.Errorf("download tarball: unexpected status %s", resp.Status)
+	}
+
+	tmp := dest + ".tmp"
+	f, err := os.Create(tmp)
+	if err != nil {
+		return err
+	}
+	defer f.Close()
+	if _, err := io.Copy(f, resp.Body); err != nil {
+		_ = os.Remove(tmp)
+		return err
+	}
+	if err := f.Close(); err != nil {
+		_ = os.Remove(tmp)
+		return err
+	}
+	return os.Rename(tmp, dest)
+}
+
+func verifyIntegrity(path, integrity string) error {
+	parts := strings.SplitN(integrity, "-", 2)
+	if len(parts) != 2 {
+		return fmt.Errorf("unsupported integrity format %q", integrity)
+	}
+	expected, err := base64.StdEncoding.DecodeString(parts[1])
+	if err != nil {
+		return err
+	}
+
+	b, err := os.ReadFile(path)
+	if err != nil {
+		return err
+	}
+
+	var actual []byte
+	switch parts[0] {
+	case "sha512":
+		sum := sha512.Sum512(b)
+		actual = sum[:]
+	case "sha256":
+		sum := sha256.Sum256(b)
+		actual = sum[:]
+	default:
+		return fmt.Errorf("unsupported integrity algorithm %q", parts[0])
+	}
+	if !bytesEqual(actual, expected) {
+		return fmt.Errorf("tarball integrity mismatch for %s", filepath.Base(path))
+	}
+	return nil
+}
+
+func extractTarball(path string) (*PackageContents, error) {
+	file, err := os.Open(path)
+	if err != nil {
+		return nil, err
+	}
+	defer file.Close()
+
+	gzr, err := gzip.NewReader(file)
+	if err != nil {
+		return nil, err
+	}
+	defer gzr.Close()
+
+	tr := tar.NewReader(gzr)
+	pc := &PackageContents{
+		Files: make(map[string][]byte),
+	}
+
+	for {
+		hdr, err := tr.Next()
+		if err == io.EOF {
+			break
+		}
+		if err != nil {
+			return nil, err
+		}
+		if hdr.Typeflag != tar.TypeReg {
+			continue
+		}
+
+		name := strings.TrimPrefix(filepath.ToSlash(hdr.Name), "package/")
+		content, err := io.ReadAll(tr)
+		if err != nil {
+			return nil, err
+		}
+		pc.Files[name] = content
+		pc.FileList = append(pc.FileList, name)
+		if name == "package.json" {
+			var pkg map[string]any
+			if json.Unmarshal(content, &pkg) == nil {
+				pc.PackageJSON = pkg
+			}
+		}
+	}
+
+	sort.Strings(pc.FileList)
+	return pc, nil
+}
+
+func tarballCacheKey(name, version string) string {
+	sum := sha256.Sum256([]byte(name + "@" + version))
+	return fmt.Sprintf("%x", sum[:])
+}
+
+func bytesEqual(a, b []byte) bool {
+	if len(a) != len(b) {
+		return false
+	}
+	for i := range a {
+		if a[i] != b[i] {
+			return false
+		}
+	}
+	return true
 }

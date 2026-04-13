@@ -4,6 +4,7 @@ import (
 	"os"
 	"path/filepath"
 
+	"github.com/MauroProto/guard/internal/yamlutil"
 	"gopkg.in/yaml.v3"
 )
 
@@ -58,7 +59,21 @@ func Load(root string) (*Workspace, error) {
 // Save writes pnpm-workspace.yaml to disk.
 func Save(root string, ws *Workspace) error {
 	path := filepath.Join(root, WorkspaceFile)
-	out, err := yaml.Marshal(ws)
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		return err
+	}
+	desired, err := yamlutil.NewDocument(ws)
+	if err != nil {
+		return err
+	}
+	doc := desired
+	if existing, err := yamlutil.LoadDocument(path); err == nil {
+		yamlutil.MergeDocuments(existing, desired)
+		doc = existing
+	} else if !os.IsNotExist(err) {
+		return err
+	}
+	out, err := yamlutil.MarshalDocument(doc)
 	if err != nil {
 		return err
 	}

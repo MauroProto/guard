@@ -6,11 +6,11 @@ import (
 	"strings"
 	"time"
 
-	"guard/internal/config"
-	"guard/internal/engine"
-	"guard/internal/pnpm"
-	"guard/internal/policy"
-	"guard/internal/ui"
+	"github.com/MauroProto/guard/internal/config"
+	"github.com/MauroProto/guard/internal/engine"
+	"github.com/MauroProto/guard/internal/pnpm"
+	"github.com/MauroProto/guard/internal/policy"
+	"github.com/MauroProto/guard/internal/ui"
 )
 
 func runApproveBuild(args []string) error {

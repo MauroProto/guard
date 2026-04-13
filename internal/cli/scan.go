@@ -8,11 +8,11 @@ import (
 	"sort"
 	"time"
 
-	"guard/internal/config"
-	"guard/internal/engine"
-	"guard/internal/model"
-	"guard/internal/report"
-	"guard/internal/ui"
+	"github.com/MauroProto/guard/internal/config"
+	"github.com/MauroProto/guard/internal/engine"
+	"github.com/MauroProto/guard/internal/model"
+	"github.com/MauroProto/guard/internal/report"
+	"github.com/MauroProto/guard/internal/ui"
 )
 
 func runScan(args []string) error {
@@ -25,9 +25,6 @@ func runScan(args []string) error {
 	failOn := fs.String("fail-on", "", "minimum severity to block: low|medium|high|critical")
 	offline := fs.Bool("offline", false, "skip network-dependent checks")
 	noOSV := fs.Bool("no-osv", false, "skip OSV vulnerability lookup")
-	// Reserved flags: offline and noOSV are parsed but not yet wired to scan logic.
-	_ = offline
-	_ = noOSV
 
 	if err := fs.Parse(args); err != nil {
 		return fmt.Errorf("%w: %v", ErrUsage, err)
@@ -40,7 +37,7 @@ func runScan(args []string) error {
 	interactive := *format == "terminal" && *output == ""
 
 	if interactive {
-		return runScanInteractive(*root, *configPath, *failOn)
+		return runScanInteractive(*root, *configPath, *failOn, *offline, *noOSV)
 	}
 
 	// Non-interactive: structured output only
@@ -48,7 +45,10 @@ func runScan(args []string) error {
 	if err != nil {
 		return err
 	}
-	opts := &engine.ScanOptions{}
+	opts := &engine.ScanOptions{
+		Offline:    *offline,
+		DisableOSV: *noOSV,
+	}
 	if *failOn != "" {
 		opts.FailOn = *failOn
 	}
@@ -74,7 +74,7 @@ func runScan(args []string) error {
 	return nil
 }
 
-func runScanInteractive(root, configPath, failOn string) error {
+func runScanInteractive(root, configPath, failOn string, offline, noOSV bool) error {
 	ui.Header(engine.Version)
 
 	// Step 1: Load config
@@ -104,7 +104,10 @@ func runScanInteractive(root, configPath, failOn string) error {
 
 	// Step 5: Scoring
 	sp = ui.NewSpinner(ui.T("scan.scoring") + "...")
-	opts := &engine.ScanOptions{}
+	opts := &engine.ScanOptions{
+		Offline:    offline,
+		DisableOSV: noOSV,
+	}
 	if failOn != "" {
 		opts.FailOn = failOn
 	}
@@ -161,18 +164,19 @@ func runScanInteractive(root, configPath, failOn string) error {
 		}
 	}
 
-	// Collect unique commands for next steps
+	// Collect unique actions for next steps
 	seen := map[string]bool{}
 	var nextSteps []nextStep
 	for _, f := range sorted {
-		if f.Command != "" && !f.Muted && !seen[f.Command] {
-			seen[f.Command] = true
+		stepText := actionText(f)
+		if stepText != "" && !f.Muted && !seen[stepText] {
+			seen[stepText] = true
 			priority := "optional"
 			if f.Blocking {
 				priority = "required"
 			}
 			nextSteps = append(nextSteps, nextStep{
-				command:  f.Command,
+				command:  stepText,
 				reason:   f.Title,
 				priority: priority,
 				severity: f.Severity,
@@ -254,10 +258,10 @@ func printFindingRich(f model.Finding) {
 			ui.Dim, ui.T("finding.fix"), ui.Reset,
 			ui.Green, f.Remediation, ui.Reset)
 	}
-	if f.Command != "" {
-		fmt.Fprintf(os.Stderr, "       %s%s:%s %s$ %s%s\n",
+	if step := actionText(f); step != "" {
+		fmt.Fprintf(os.Stderr, "       %s%s:%s %s%s%s\n",
 			ui.Dim, ui.T("finding.run"), ui.Reset,
-			ui.Yellow, f.Command, ui.Reset)
+			ui.Yellow, step, ui.Reset)
 	}
 	fmt.Fprintln(os.Stderr)
 }
@@ -271,7 +275,7 @@ func printNextStep(n int, ns nextStep) {
 	}
 	fmt.Fprintf(os.Stderr, "  %s%s%d.%s %s%s%s  %s%s%s\n",
 		marker, ui.Bold, n, ui.Reset,
-		ui.Yellow, "$ "+ns.command, ui.Reset,
+		ui.Yellow, ns.command, ui.Reset,
 		ui.Dim, label, ui.Reset)
 	fmt.Fprintf(os.Stderr, "     %s%s%s\n\n",
 		ui.Dim, ns.reason, ui.Reset)
@@ -288,4 +292,17 @@ func renderReport(rep *model.Report, format string, noColor bool) ([]byte, error
 	default:
 		return []byte(report.Terminal(rep, noColor)), nil
 	}
+}
+
+func actionText(f model.Finding) string {
+	if action := f.PrimaryAction(); action != nil {
+		if action.Type == model.ActionTypeManual {
+			return action.Label
+		}
+		return "$ " + action.CommandString()
+	}
+	if cmd := f.LegacyCommand(); cmd != "" {
+		return "$ " + cmd
+	}
+	return ""
 }

@@ -3,7 +3,7 @@ package report
 import (
 	"encoding/json"
 
-	"guard/internal/model"
+	"github.com/MauroProto/guard/internal/model"
 )
 
 // JSON marshals the report to indented JSON.
