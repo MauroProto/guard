@@ -1,4 +1,5 @@
 {
+  "description": "Focused Guard hook runtime for Claude Code",
   "hooks": {
     "SessionStart": [
       {
@@ -10,23 +11,23 @@
         ]
       }
     ],
-    "FileChanged": [
+    "CwdChanged": [
       {
         "hooks": [
           {
             "type": "command",
-            "command": "${CLAUDE_PLUGIN_ROOT}/scripts/file_changed_guard.sh"
+            "command": "${CLAUDE_PLUGIN_ROOT}/scripts/cwd_changed_guard.sh"
           }
         ]
       }
     ],
-    "PostToolUse": [
+    "FileChanged": [
       {
-        "matcher": "Write|Edit",
+        "matcher": "package.json|pnpm-lock.yaml|pnpm-workspace.yaml|policy.yaml|CODEOWNERS",
         "hooks": [
           {
             "type": "command",
-            "command": "${CLAUDE_PLUGIN_ROOT}/scripts/post_write_guard.sh"
+            "command": "${CLAUDE_PLUGIN_ROOT}/scripts/file_changed_guard.sh"
           }
         ]
       }
@@ -37,7 +38,108 @@
         "hooks": [
           {
             "type": "command",
+            "if": "Bash(pnpm add*)",
             "command": "${CLAUDE_PLUGIN_ROOT}/scripts/pre_bash_guard.sh"
+          },
+          {
+            "type": "command",
+            "if": "Bash(pnpm up*)",
+            "command": "${CLAUDE_PLUGIN_ROOT}/scripts/pre_bash_guard.sh"
+          },
+          {
+            "type": "command",
+            "if": "Bash(pnpm install*)",
+            "command": "${CLAUDE_PLUGIN_ROOT}/scripts/pre_bash_guard.sh"
+          },
+          {
+            "type": "command",
+            "if": "Bash(pnpm remove*)",
+            "command": "${CLAUDE_PLUGIN_ROOT}/scripts/pre_bash_guard.sh"
+          },
+          {
+            "type": "command",
+            "if": "Bash(npm install*)",
+            "command": "${CLAUDE_PLUGIN_ROOT}/scripts/pre_bash_guard.sh"
+          },
+          {
+            "type": "command",
+            "if": "Bash(npm update*)",
+            "command": "${CLAUDE_PLUGIN_ROOT}/scripts/pre_bash_guard.sh"
+          },
+          {
+            "type": "command",
+            "if": "Bash(npm uninstall*)",
+            "command": "${CLAUDE_PLUGIN_ROOT}/scripts/pre_bash_guard.sh"
+          },
+          {
+            "type": "command",
+            "if": "Bash(corepack use*)",
+            "command": "${CLAUDE_PLUGIN_ROOT}/scripts/pre_bash_guard.sh"
+          }
+        ]
+      }
+    ],
+    "PostToolUse": [
+      {
+        "matcher": "Write|Edit",
+        "hooks": [
+          {
+            "type": "command",
+            "async": true,
+            "command": "${CLAUDE_PLUGIN_ROOT}/scripts/post_write_guard.sh"
+          }
+        ]
+      },
+      {
+        "matcher": "Bash",
+        "hooks": [
+          {
+            "type": "command",
+            "if": "Bash(pnpm add*)",
+            "async": true,
+            "command": "${CLAUDE_PLUGIN_ROOT}/scripts/post_bash_guard.sh"
+          },
+          {
+            "type": "command",
+            "if": "Bash(pnpm up*)",
+            "async": true,
+            "command": "${CLAUDE_PLUGIN_ROOT}/scripts/post_bash_guard.sh"
+          },
+          {
+            "type": "command",
+            "if": "Bash(pnpm install*)",
+            "async": true,
+            "command": "${CLAUDE_PLUGIN_ROOT}/scripts/post_bash_guard.sh"
+          },
+          {
+            "type": "command",
+            "if": "Bash(pnpm remove*)",
+            "async": true,
+            "command": "${CLAUDE_PLUGIN_ROOT}/scripts/post_bash_guard.sh"
+          },
+          {
+            "type": "command",
+            "if": "Bash(npm install*)",
+            "async": true,
+            "command": "${CLAUDE_PLUGIN_ROOT}/scripts/post_bash_guard.sh"
+          },
+          {
+            "type": "command",
+            "if": "Bash(npm update*)",
+            "async": true,
+            "command": "${CLAUDE_PLUGIN_ROOT}/scripts/post_bash_guard.sh"
+          },
+          {
+            "type": "command",
+            "if": "Bash(npm uninstall*)",
+            "async": true,
+            "command": "${CLAUDE_PLUGIN_ROOT}/scripts/post_bash_guard.sh"
+          },
+          {
+            "type": "command",
+            "if": "Bash(corepack use*)",
+            "async": true,
+            "command": "${CLAUDE_PLUGIN_ROOT}/scripts/post_bash_guard.sh"
           }
         ]
       }

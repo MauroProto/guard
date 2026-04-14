@@ -73,8 +73,27 @@ for rel in required_agents:
     if not os.path.isfile(path):
         raise SystemExit(f"missing agent file: {path}")
 
+required_support = [
+    os.path.join(plugin_root, "scripts", "guard_hook.py"),
+    os.path.join(repo_root, "testdata", "plugin-hooks", "session_start.json"),
+    os.path.join(repo_root, "testdata", "plugin-hooks", "cwd_changed.json"),
+    os.path.join(repo_root, "testdata", "plugin-hooks", "file_changed.json"),
+    os.path.join(repo_root, "testdata", "plugin-hooks", "pre_bash.json"),
+    os.path.join(repo_root, "testdata", "plugin-hooks", "post_write.json"),
+    os.path.join(repo_root, "testdata", "plugin-hooks", "post_bash.json"),
+    os.path.join(repo_root, "testdata", "plugin-hooks", "stop.json"),
+]
+for path in required_support:
+    if not os.path.isfile(path):
+        raise SystemExit(f"missing plugin support file: {path}")
+
 with open(hooks_json, "r", encoding="utf-8") as fh:
     hooks = json.load(fh)
+
+required_events = {"SessionStart", "CwdChanged", "FileChanged", "PreToolUse", "PostToolUse", "Stop"}
+missing_events = sorted(required_events - set(hooks.get("hooks", {})))
+if missing_events:
+    raise SystemExit(f"hooks.json is missing events: {', '.join(missing_events)}")
 
 for event, entries in hooks.get("hooks", {}).items():
     for entry in entries:
@@ -89,5 +108,42 @@ for event, entries in hooks.get("hooks", {}).items():
             if not os.access(target, os.X_OK):
                 raise SystemExit(f"{event} hook script is not executable: {target}")
 
+pre_bash_ifs = []
+post_bash_async = False
+post_write_async = False
+for entry in hooks["hooks"].get("PreToolUse", []):
+    if entry.get("matcher") == "Bash":
+        pre_bash_ifs.extend(hook.get("if", "") for hook in entry.get("hooks", []))
+for entry in hooks["hooks"].get("PostToolUse", []):
+    if entry.get("matcher") == "Write|Edit":
+        post_write_async = any(hook.get("async") for hook in entry.get("hooks", []))
+    if entry.get("matcher") == "Bash":
+        post_bash_async = any(hook.get("async") for hook in entry.get("hooks", []))
+
+expected_ifs = {
+    "Bash(pnpm add*)",
+    "Bash(pnpm up*)",
+    "Bash(pnpm install*)",
+    "Bash(pnpm remove*)",
+    "Bash(npm install*)",
+    "Bash(npm update*)",
+    "Bash(npm uninstall*)",
+    "Bash(corepack use*)",
+}
+if missing := sorted(expected_ifs - set(pre_bash_ifs)):
+    raise SystemExit("PreToolUse Bash is missing command filters: " + ", ".join(missing))
+if not post_write_async:
+    raise SystemExit("PostToolUse Write|Edit hook must be async")
+if not post_bash_async:
+    raise SystemExit("PostToolUse Bash hook must be async")
+
 print("plugin structure OK")
 PY
+
+if command -v claude >/dev/null 2>&1; then
+  echo "running official Claude validator"
+  claude plugins validate "$REPO_ROOT"
+  claude plugins validate "$PLUGIN_ROOT"
+else
+  echo "warning: claude CLI not found; skipping official plugin validation" >&2
+fi

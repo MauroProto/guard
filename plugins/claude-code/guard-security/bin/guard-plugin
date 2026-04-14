@@ -3,10 +3,13 @@ set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PLUGIN_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
-source "$PLUGIN_ROOT/scripts/common.sh"
 
 resolve_guard_binary() {
   if [[ -n "${GUARD_BIN:-}" ]]; then
+    if [[ ! -x "$GUARD_BIN" ]]; then
+      echo "guard plugin: GUARD_BIN points to a missing or non-executable file: $GUARD_BIN" >&2
+      return 1
+    fi
     printf '%s\n' "$GUARD_BIN"
     return 0
   fi
@@ -17,12 +20,47 @@ resolve_guard_binary() {
 version_gte() {
   local current="$1"
   local minimum="$2"
-  if [[ "$current" == "dev" || "$minimum" == "dev" ]]; then
-    return 0
-  fi
-  local first
-  first="$(printf '%s\n%s\n' "$minimum" "$current" | sort -V | head -n1)"
-  [[ "$first" == "$minimum" ]]
+  python3 - "$current" "$minimum" <<'PY'
+import re
+import sys
+
+current, minimum = sys.argv[1:3]
+if current == "dev" or minimum == "dev":
+    raise SystemExit(0)
+
+def normalize(value: str):
+    value = value.strip()
+    if value.startswith("v"):
+        value = value[1:]
+    match = re.match(r"^(\d+)\.(\d+)\.(\d+)", value)
+    if not match:
+        raise SystemExit(1)
+    return tuple(int(part) for part in match.groups())
+
+raise SystemExit(0 if normalize(current) >= normalize(minimum) else 1)
+PY
+}
+
+detect_guard_version() {
+  local guard_bin="$1"
+  python3 - "$guard_bin" <<'PY'
+import re
+import subprocess
+import sys
+
+guard_bin = sys.argv[1]
+proc = subprocess.run([guard_bin, "version"], capture_output=True, text=True, check=False)
+text = (proc.stdout or "").strip()
+if proc.returncode != 0 or not text:
+    sys.stderr.write((proc.stderr or text or "unable to run guard version").strip() + "\n")
+    raise SystemExit(1)
+
+match = re.search(r"\b(v?\d+\.\d+\.\d+|dev)\b", text)
+if not match:
+    sys.stderr.write(f"could not parse Guard version from: {text}\n")
+    raise SystemExit(1)
+print(match.group(1).lstrip("v"))
+PY
 }
 
 main() {
@@ -33,8 +71,11 @@ main() {
   fi
 
   local current_version minimum_version
-  current_version="$("$guard_bin" version | awk '{print $2}')"
-  minimum_version="${GUARD_MIN_VERSION:-0.1.0}"
+  if ! current_version="$(detect_guard_version "$guard_bin")"; then
+    echo "guard plugin could not determine the Guard CLI version." >&2
+    exit 1
+  fi
+  minimum_version="${GUARD_MIN_VERSION:-0.2.0}"
   if ! version_gte "$current_version" "$minimum_version"; then
     echo "guard plugin requires Guard CLI >= ${minimum_version}; found ${current_version}." >&2
     exit 1

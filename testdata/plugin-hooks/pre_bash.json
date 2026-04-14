@@ -1,0 +1,13 @@
+{
+  "session_id": "__SESSION_ID__",
+  "transcript_path": "__TRANSCRIPT__",
+  "cwd": "__CWD__",
+  "permission_mode": "default",
+  "hook_event_name": "PreToolUse",
+  "tool_name": "Bash",
+  "tool_use_id": "toolu_smoke_pre",
+  "tool_input": {
+    "command": "__COMMAND__",
+    "description": "Smoke command"
+  }
+}

@@ -1,0 +1,18 @@
+{
+  "session_id": "__SESSION_ID__",
+  "transcript_path": "__TRANSCRIPT__",
+  "cwd": "__CWD__",
+  "permission_mode": "default",
+  "hook_event_name": "PostToolUse",
+  "tool_name": "Bash",
+  "tool_use_id": "toolu_smoke_bash",
+  "tool_input": {
+    "command": "__COMMAND__",
+    "description": "Smoke bash command"
+  },
+  "tool_response": {
+    "stdout": "",
+    "stderr": "",
+    "exitCode": 0
+  }
+}

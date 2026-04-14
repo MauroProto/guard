@@ -1,0 +1,8 @@
+{
+  "session_id": "__SESSION_ID__",
+  "transcript_path": "__TRANSCRIPT__",
+  "cwd": "__CWD__",
+  "hook_event_name": "CwdChanged",
+  "old_cwd": "__OLD_CWD__",
+  "new_cwd": "__NEW_CWD__"
+}

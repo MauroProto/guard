@@ -1,0 +1,9 @@
+{
+  "session_id": "__SESSION_ID__",
+  "transcript_path": "__TRANSCRIPT__",
+  "cwd": "__CWD__",
+  "permission_mode": "default",
+  "hook_event_name": "Stop",
+  "stop_hook_active": __STOP_HOOK_ACTIVE__,
+  "last_assistant_message": "__LAST_ASSISTANT__"
+}

@@ -1,0 +1,17 @@
+{
+  "session_id": "__SESSION_ID__",
+  "transcript_path": "__TRANSCRIPT__",
+  "cwd": "__CWD__",
+  "permission_mode": "default",
+  "hook_event_name": "PostToolUse",
+  "tool_name": "Write",
+  "tool_use_id": "toolu_smoke_write",
+  "tool_input": {
+    "file_path": "__FILE_PATH__",
+    "content": "updated content"
+  },
+  "tool_response": {
+    "filePath": "__FILE_PATH__",
+    "success": true
+  }
+}
