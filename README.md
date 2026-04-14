@@ -1,159 +1,173 @@
-# 🛡 Guard
+# Guard
 
-**Supply chain security CLI for pnpm projects.**
+Supply chain security for `pnpm` repositories and GitHub Actions.
 
-Guard scans your JavaScript/TypeScript repositories for supply chain risks, enforces security policies, and applies safe local remediations from the terminal.
+Guard helps teams answer one question before a dependency or CI change lands:
+
+> Can we trust this change?
+
+It combines:
+
+- repository posture checks,
+- dependency and lockfile review,
+- workflow hardening,
+- policy validation and exceptions,
+- machine-readable output for CI and automation.
 
 <p align="center">
   <img src="https://img.shields.io/badge/go-%3E%3D1.23-blue" alt="Go 1.23+">
   <img src="https://img.shields.io/badge/pnpm-supported-orange" alt="pnpm">
+  <img src="https://img.shields.io/badge/claude%20code-plugin-available-6f42c1" alt="Claude Code plugin">
   <img src="https://img.shields.io/badge/license-MIT-green" alt="MIT License">
 </p>
 
----
-
 ## Install
 
-### One-liner (macOS/Linux)
+| Target | Install |
+| --- | --- |
+| Claude Code | `claude plugins marketplace add MauroProto/guard && claude plugins install guard@guard` |
+| Guard CLI (Go) | `go install github.com/MauroProto/guard/cmd/guard@latest` |
+| Guard CLI (shell) | `curl -fsSL https://raw.githubusercontent.com/MauroProto/guard/main/install.sh \| sh` |
+| From source | `git clone https://github.com/MauroProto/guard.git && cd guard && make install` |
+
+If the Claude Code plugin cannot find the `guard` binary in `PATH`, set:
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/MauroProto/guard/main/install.sh | sh
+export GUARD_BIN=/absolute/path/to/guard
 ```
 
-### With Go
+## What Guard ships
 
-```bash
-go install github.com/MauroProto/guard/cmd/guard@latest
+Guard is a hybrid product:
+
+- **Guard CLI** stays first-class for CI, SARIF, JSON, headless scans, `review-pr`, `baseline`, and `policy lint`.
+- **Claude Code plugin** adds focused, contextual Guard runs inside edit sessions without replacing the CLI.
+
+The plugin is distributed from this repository through `.claude-plugin/marketplace.json`, and the Claude Code plugin itself lives at:
+
+```text
+plugins/claude-code/guard-security
 ```
 
-### From source
+## Quick start
 
 ```bash
-git clone https://github.com/MauroProto/guard.git
-cd guard
-make install
-```
-
----
-
-## Quick Start
-
-```bash
-# Scan your repo
-guard scan
-
-# Apply safe local remediations
-guard fix
-
-# Set up a secure baseline
 guard init
+guard scan
+guard fix
+guard baseline record
 ```
 
----
+For a PR or branch review:
+
+```bash
+guard review-pr
+guard review-pr --base origin/main --head HEAD --format markdown
+guard explain review.diff.install_script.added
+```
+
+For focused scans:
+
+```bash
+guard scan --scope workflows --format json
+guard scan --scope deps --files package.json,pnpm-lock.yaml --format json
+guard scan --scope policy --files .guard/policy.yaml --format json
+guard scan --changed-files --format json
+```
+
+## Claude Code plugin
+
+The plugin is designed to be useful, not noisy.
+
+When enabled, it reacts to the right moments:
+
+- `SessionStart`
+  - verifies Guard availability,
+  - detects repo root and key files,
+  - initializes light session state.
+- `FileChanged`
+  - marks `deps`, `workflows`, `workspace`, or `policy` as pending review.
+- `PostToolUse` on `Write|Edit`
+  - runs focused Guard scans in JSON mode for affected surfaces.
+- `PreToolUse` on `Bash`
+  - watches dependency mutation commands such as `pnpm add`, `pnpm up`, `pnpm install`, `npm install`, and `corepack use`.
+- `Stop`
+  - summarizes pending or blocking Guard scopes.
+
+V1 behavior is intentionally balanced:
+
+- no full scans on every event,
+- no auto-fix from hooks,
+- no blanket Bash blocking,
+- no dependence on paths outside the installed plugin bundle.
+
+### One-off local plugin testing
+
+```bash
+claude --plugin-dir /absolute/path/to/guard/plugins/claude-code/guard-security
+```
 
 ## Commands
 
 | Command | Alias | Description |
-|---------|-------|-------------|
+| --- | --- | --- |
 | `guard scan` | `guard s` | Scan the repository for security issues |
-| `guard fix` | `guard f` | Auto-fix issues found by scan |
-| `guard init` | `guard i` | Create or patch a secure baseline (policy + pnpm config by default) |
+| `guard fix` | `guard f` | Apply safe local remediations |
+| `guard init` | `guard i` | Create or patch a secure baseline |
 | `guard ci` | `guard c` | Strict scan mode for CI pipelines |
-| `guard diff` | `guard d` | Compare two local package versions for risk signals |
+| `guard diff` | `guard d` | Compare two package versions for risk signals |
+| `guard review-pr` | `guard review` | Review dependency and workflow changes between git refs |
 | `guard approve` | `guard ab` | Approve a package that needs build scripts |
-
-### Typical workflow
-
-```bash
-guard scan       # 1. See what's wrong
-guard fix        # 2. Apply safe local remediations
-guard scan       # 3. Verify it's clean
-```
-
----
+| `guard baseline record` | - | Record the current finding set as baseline debt |
+| `guard explain` | - | Explain a rule ID or a finding fingerprint |
+| `guard policy lint` | - | Validate policy/config semantics and deprecated fields |
 
 ## What it checks
 
-### Repository structure
-- Missing `pnpm-lock.yaml`
-- Missing `packageManager` field in `package.json`
-- Missing `engines.node` declaration
+### Repository posture
 
-### pnpm security settings
-- `minimumReleaseAge` not configured or too low
+- missing `pnpm-lock.yaml`
+- missing `packageManager` in `package.json`
+- missing `engines.node`
+
+### pnpm hardening
+
+- `minimumReleaseAge` missing or too low
 - `blockExoticSubdeps` disabled
 - `strictDepBuilds` disabled
 - `trustPolicy` not set to `no-downgrade`
-- Unapproved build scripts in `allowBuilds`
+- unapproved build scripts in `allowBuilds`
 
-### GitHub workflow hygiene
-- Actions not pinned to full commit SHA
-- Missing or overly broad `permissions` block
-- Missing `CODEOWNERS` for workflow protection
+### GitHub Actions
 
-### Package diff heuristics (`guard diff`)
+- actions not pinned to full commit SHA
+- missing or overly broad `permissions`
+- missing `CODEOWNERS`
+- risky `pull_request_target` patterns
+- privileged publish workflows without attestations
 
-```bash
-guard diff lodash@4.17.20..4.17.21
-guard diff lodash@4.17.20..4.17.21 --from-dir old/ --to-dir new/
-```
+### Dependency review
 
-Detects:
-- New install scripts (postinstall, preinstall)
-- Remote fetch / command execution patterns
-- New binary files
-- Obfuscation signals (eval, long hex strings)
-- Sensitive path access (.env, .ssh, .npmrc)
-
----
+- new install scripts
+- suspicious remote fetch or command execution patterns
+- new binary files
+- obfuscation signals
+- sensitive path access like `.env`, `.ssh`, `.npmrc`
+- new OSV advisories
+- trust regressions surfaced by `review-pr`
 
 ## Output formats
 
 ```bash
-guard scan                         # Terminal with colors (default)
-guard scan --format json           # JSON for automation
-guard scan --format sarif          # SARIF 2.1.0 for GitHub Code Scanning
-guard scan --format markdown       # Markdown table for PR comments
+guard scan --format terminal
+guard scan --format json
+guard scan --format sarif
+guard scan --format markdown
 ```
 
----
+All machine-readable outputs are schema-versioned and suitable for plugin or CI consumption.
 
-## Language
-
-Guard auto-detects your system language.
-
-```bash
-guard --lang en scan    # Force English
-guard --lang es scan    # Force Spanish
-```
-
----
-
-## Presets
-
-```bash
-guard init --preset strict      # 72h release age, blocks medium+
-guard init --preset balanced    # 24h release age, blocks high+ (default)
-guard init --preset local       # 1h release age, blocks critical only
-guard init --add-ci             # Also write .github/workflows/guard-ci.yml
-guard init --with-ai-docs       # Also write AGENTS.md and CLAUDE.md
-```
-
----
-
-## Exit codes
-
-| Code | Meaning |
-|------|---------|
-| `0` | No blocking findings |
-| `1` | Blocking findings detected |
-| `2` | Usage error |
-
----
-
-## CI Integration
-
-Add to `.github/workflows/guard.yml`:
+## CI example
 
 ```yaml
 name: Guard
@@ -167,7 +181,7 @@ jobs:
       - uses: actions/checkout@<SHA>
       - uses: actions/setup-go@<SHA>
         with:
-          go-version: '1.23'
+          go-version: "1.23"
       - run: go install github.com/MauroProto/guard/cmd/guard@latest
       - run: guard ci --format sarif --output guard.sarif
       - uses: github/codeql-action/upload-sarif@<SHA>
@@ -176,19 +190,42 @@ jobs:
           sarif_file: guard.sarif
 ```
 
----
-
 ## Development
 
 ```bash
 git clone https://github.com/MauroProto/guard.git
 cd guard
-make build       # Build binary
-make test        # Run tests
-make install     # Install to GOPATH/bin
+make build
+make test
+make vet
+make plugin-check
+make plugin-smoke
 ```
 
----
+Validate the Claude Code plugin and marketplace locally:
+
+```bash
+claude plugins validate .
+claude plugins marketplace add .
+claude plugins install guard@guard
+```
+
+## Roadmap
+
+Guard is intentionally focused today:
+
+- `pnpm` workspaces
+- GitHub Actions
+- Claude Code integration
+- deterministic CLI and CI usage
+
+Likely next steps:
+
+- deeper `review-lockfile` workflows,
+- richer provenance and trusted publishing signals,
+- private registries and `.npmrc` awareness,
+- optional MCP integration,
+- broader multi-agent packaging.
 
 ## License
 

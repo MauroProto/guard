@@ -136,6 +136,65 @@ func TestAuditNoFiles(t *testing.T) {
 	}
 }
 
+func TestAuditPullRequestTargetCheckout(t *testing.T) {
+	root := t.TempDir()
+	workflowPath := filepath.Join(root, ".github", "workflows", "pr-target.yml")
+	if err := os.MkdirAll(filepath.Dir(workflowPath), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	workflow := `name: PR Target
+on:
+  pull_request_target:
+jobs:
+  test:
+    permissions:
+      contents: read
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd
+`
+	if err := os.WriteFile(workflowPath, []byte(workflow), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	findings := AuditWorkflows(root, []string{workflowPath})
+	if !hasRule(findings, "github.workflow.pull_request_target.unsafe") {
+		t.Fatalf("expected pull_request_target unsafe finding, got %+v", findings)
+	}
+}
+
+func TestAuditPublishWorkflowMissingAttestations(t *testing.T) {
+	root := t.TempDir()
+	workflowPath := filepath.Join(root, ".github", "workflows", "publish.yml")
+	if err := os.MkdirAll(filepath.Dir(workflowPath), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	workflow := `name: Publish
+on: [push]
+permissions:
+  contents: read
+jobs:
+  publish:
+    permissions:
+      packages: write
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd
+      - run: pnpm publish --access public
+`
+	if err := os.WriteFile(workflowPath, []byte(workflow), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	findings := AuditWorkflows(root, []string{workflowPath})
+	if !hasRule(findings, "github.workflow.publish.attestations.missing") {
+		t.Fatalf("expected publish attestations finding, got %+v", findings)
+	}
+	if !hasRule(findings, "github.workflow.publish.permissions.broad") {
+		t.Fatalf("expected publish permissions finding, got %+v", findings)
+	}
+}
+
 func hasRule(findings []model.Finding, ruleID string) bool {
 	for _, finding := range findings {
 		if finding.RuleID == ruleID {

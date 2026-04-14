@@ -1,0 +1,8 @@
+{
+  "name": "guard",
+  "version": "0.1.0",
+  "description": "Context-aware Guard integration for Claude Code sessions in pnpm and GitHub repositories.",
+  "author": {
+    "name": "MauroProto"
+  }
+}

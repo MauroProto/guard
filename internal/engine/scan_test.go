@@ -162,7 +162,8 @@ func TestUnreviewedBuildWithUnsafePackageNameStaysManual(t *testing.T) {
 		},
 	}
 	report := NewReport(".")
-	checkPNPM(report, cfg, ws)
+	checkWorkspacePosture(report, cfg, ws)
+	checkPendingBuildApprovals(report, cfg, ".", ws)
 
 	if len(report.Findings) != 1 {
 		t.Fatalf("expected 1 finding, got %d", len(report.Findings))
@@ -170,5 +171,215 @@ func TestUnreviewedBuildWithUnsafePackageNameStaysManual(t *testing.T) {
 	action := report.Findings[0].PrimaryAction()
 	if action == nil || action.Type != model.ActionTypeManual {
 		t.Fatalf("expected manual action, got %+v", action)
+	}
+}
+
+func TestScanUsesConfiguredWorkflowPaths(t *testing.T) {
+	root := t.TempDir()
+	workflowPath := filepath.Join(root, ".ci", "workflows", "custom.yml")
+	if err := os.MkdirAll(filepath.Dir(workflowPath), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(root, "package.json"), []byte(`{"name":"app","packageManager":"pnpm@10.20.0","engines":{"node":">=22"}}`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(root, "pnpm-lock.yaml"), []byte("lockfileVersion: '9.0'\npackages: {}\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(root, "pnpm-workspace.yaml"), []byte("packages:\n  - packages/*\nminimumReleaseAge: 1440\ntrustPolicy: no-downgrade\nblockExoticSubdeps: true\nstrictDepBuilds: true\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	workflow := `name: CI
+on: [push]
+permissions:
+  contents: read
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@main
+`
+	if err := os.WriteFile(workflowPath, []byte(workflow), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	cfg := config.Default()
+	cfg.GitHub.WorkflowPaths = []string{".ci/workflows"}
+	rep, err := ScanRepo(context.Background(), root, cfg, &ScanOptions{DisableOSV: true})
+	if err != nil {
+		t.Fatalf("scan failed: %v", err)
+	}
+
+	found := false
+	for _, finding := range rep.Findings {
+		if finding.RuleID == "github.workflow.unpinned_action" && finding.File == ".ci/workflows/custom.yml" {
+			found = true
+		}
+	}
+	if !found {
+		t.Fatalf("expected workflow in custom path to be audited, got %+v", rep.Findings)
+	}
+}
+
+func TestScanHonorsGitHubRuleGates(t *testing.T) {
+	root := t.TempDir()
+	workflowPath := filepath.Join(root, ".github", "workflows", "ci.yml")
+	if err := os.MkdirAll(filepath.Dir(workflowPath), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(root, "package.json"), []byte(`{"name":"app","packageManager":"pnpm@10.20.0","engines":{"node":">=22"}}`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(root, "pnpm-lock.yaml"), []byte("lockfileVersion: '9.0'\npackages: {}\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(root, "pnpm-workspace.yaml"), []byte("packages:\n  - packages/*\nminimumReleaseAge: 1440\ntrustPolicy: no-downgrade\nblockExoticSubdeps: true\nstrictDepBuilds: true\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	workflow := `name: CI
+on: [push]
+jobs:
+  test:
+    permissions:
+      packages: write
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@main
+`
+	if err := os.WriteFile(workflowPath, []byte(workflow), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	cfg := config.Default()
+	cfg.GitHub.RequirePinnedActions = false
+	cfg.GitHub.RequireReadOnlyDefaultToken = false
+	rep, err := ScanRepo(context.Background(), root, cfg, &ScanOptions{DisableOSV: true})
+	if err != nil {
+		t.Fatalf("scan failed: %v", err)
+	}
+
+	for _, finding := range rep.Findings {
+		if finding.RuleID == "github.workflow.unpinned_action" || finding.RuleID == "github.workflow.permissions.missing" || finding.RuleID == "github.workflow.job_permissions.broad" || finding.RuleID == "github.workflow.token_permissions.broad" {
+			t.Fatalf("did not expect gated GitHub finding %s", finding.RuleID)
+		}
+	}
+}
+
+func TestScanScopePolicyOnly(t *testing.T) {
+	root := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(root, ".guard"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(filepath.Join(root, ".github", "workflows"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	policyYAML := `version: 1
+diff:
+  failOnSignals:
+    - definitely-not-a-real-signal
+`
+	if err := os.WriteFile(filepath.Join(root, ".guard", "policy.yaml"), []byte(policyYAML), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	cfg, err := config.Load(root, "")
+	if err != nil {
+		t.Fatalf("load config: %v", err)
+	}
+	rep, err := ScanRepo(context.Background(), root, cfg, &ScanOptions{Scope: "policy", DisableOSV: true})
+	if err != nil {
+		t.Fatalf("scan failed: %v", err)
+	}
+
+	if len(rep.Findings) != 1 {
+		t.Fatalf("expected exactly one policy finding, got %+v", rep.Findings)
+	}
+	if rep.Findings[0].RuleID != "config.diff.failOnSignals.unknown" {
+		t.Fatalf("expected policy lint finding, got %+v", rep.Findings)
+	}
+}
+
+func TestScanFilesWorkflowOnlySkipsPackageMetadata(t *testing.T) {
+	root := writeFocusedScanFixture(t)
+	cfg := config.Default()
+	rep, err := ScanRepo(context.Background(), root, cfg, &ScanOptions{
+		Scope:      "all",
+		Files:      []string{".github/workflows/ci.yml"},
+		DisableOSV: true,
+	})
+	if err != nil {
+		t.Fatalf("scan failed: %v", err)
+	}
+
+	expectFinding(t, rep.Findings, "github.workflow.unpinned_action")
+	expectNoFinding(t, rep.Findings, "repo.packageManager.unpinned")
+	expectNoFinding(t, rep.Findings, "repo.nodeEngine.missing")
+}
+
+func TestScanFilesPackageJSONOnlySkipsWorkflowAudit(t *testing.T) {
+	root := writeFocusedScanFixture(t)
+	cfg := config.Default()
+	rep, err := ScanRepo(context.Background(), root, cfg, &ScanOptions{
+		Scope:      "all",
+		Files:      []string{"package.json"},
+		DisableOSV: true,
+	})
+	if err != nil {
+		t.Fatalf("scan failed: %v", err)
+	}
+
+	expectFinding(t, rep.Findings, "repo.packageManager.unpinned")
+	expectFinding(t, rep.Findings, "repo.nodeEngine.missing")
+	expectNoFinding(t, rep.Findings, "github.workflow.unpinned_action")
+}
+
+func writeFocusedScanFixture(t *testing.T) string {
+	t.Helper()
+	root := t.TempDir()
+	workflowPath := filepath.Join(root, ".github", "workflows", "ci.yml")
+	if err := os.MkdirAll(filepath.Dir(workflowPath), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(root, "package.json"), []byte(`{"name":"app"}`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(root, "pnpm-lock.yaml"), []byte("lockfileVersion: '9.0'\npackages: {}\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(root, "pnpm-workspace.yaml"), []byte("packages:\n  - packages/*\nminimumReleaseAge: 1440\ntrustPolicy: no-downgrade\nblockExoticSubdeps: true\nstrictDepBuilds: true\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	workflow := `name: CI
+on: [push]
+permissions:
+  contents: read
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@main
+`
+	if err := os.WriteFile(workflowPath, []byte(workflow), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	return root
+}
+
+func expectFinding(t *testing.T, findings []model.Finding, ruleID string) {
+	t.Helper()
+	for _, finding := range findings {
+		if finding.RuleID == ruleID {
+			return
+		}
+	}
+	t.Fatalf("expected finding %s, got %+v", ruleID, findings)
+}
+
+func expectNoFinding(t *testing.T, findings []model.Finding, ruleID string) {
+	t.Helper()
+	for _, finding := range findings {
+		if finding.RuleID == ruleID {
+			t.Fatalf("did not expect finding %s, got %+v", ruleID, findings)
+		}
 	}
 }

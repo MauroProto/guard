@@ -1,6 +1,7 @@
 package pnpm
 
 import (
+	"os"
 	"path/filepath"
 	"testing"
 )
@@ -84,5 +85,31 @@ func TestSaveAndReloadWorkspace(t *testing.T) {
 	}
 	if len(loaded.Packages) != 1 || loaded.Packages[0] != "packages/*" {
 		t.Fatalf("unexpected packages: %v", loaded.Packages)
+	}
+}
+
+func TestResolvePackageDirsHonorsExcludePatterns(t *testing.T) {
+	root := t.TempDir()
+	for _, dir := range []string{
+		filepath.Join(root, "packages", "web"),
+		filepath.Join(root, "packages", "skip-me"),
+	} {
+		if err := os.MkdirAll(dir, 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(filepath.Join(dir, "package.json"), []byte(`{"name":"pkg"}`), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	dirs, err := ResolvePackageDirs(root, []string{"packages/*", "!packages/skip-me"})
+	if err != nil {
+		t.Fatalf("resolve package dirs: %v", err)
+	}
+	if len(dirs) != 1 {
+		t.Fatalf("expected 1 resolved dir, got %v", dirs)
+	}
+	if got := filepath.ToSlash(dirs[0]); got != filepath.ToSlash(filepath.Join(root, "packages", "web")) {
+		t.Fatalf("unexpected resolved dir %q", got)
 	}
 }

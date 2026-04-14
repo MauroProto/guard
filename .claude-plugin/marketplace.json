@@ -1,0 +1,21 @@
+{
+  "name": "guard",
+  "metadata": {
+    "description": "Guard plugins and integrations for focused supply chain security workflows."
+  },
+  "owner": {
+    "name": "MauroProto"
+  },
+  "plugins": [
+    {
+      "name": "guard",
+      "description": "Context-aware Guard integration for Claude Code sessions in pnpm and GitHub repositories.",
+      "version": "0.1.0",
+      "author": {
+        "name": "MauroProto"
+      },
+      "source": "./plugins/claude-code/guard-security",
+      "category": "security"
+    }
+  ]
+}

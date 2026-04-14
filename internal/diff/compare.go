@@ -23,10 +23,11 @@ func Compare(target Target, from, to *PackageContents, suspiciousAPIs []string) 
 	}
 
 	return &DiffResult{
-		Target:  target,
-		Signals: signals,
-		Score:   scoreDiff(signals),
-		Summary: summarizeDiff(signals),
+		SchemaVersion: "1",
+		Target:        target,
+		Signals:       signals,
+		Score:         scoreDiff(signals),
+		Summary:       summarizeDiff(signals),
 	}
 }
 

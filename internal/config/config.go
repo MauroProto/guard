@@ -19,6 +19,7 @@ type Config struct {
 	GitHub      GitHub      `yaml:"github"`
 	OSV         OSV         `yaml:"osv"`
 	Diff        Diff        `yaml:"diff"`
+	Baseline    Baseline    `yaml:"baseline"`
 	Exceptions  Exceptions  `yaml:"exceptions"`
 }
 
@@ -65,6 +66,10 @@ type Diff struct {
 	SuspiciousAPIs []string `yaml:"suspiciousApis"`
 }
 
+type Baseline struct {
+	Path string `yaml:"path"`
+}
+
 type Exceptions struct {
 	Rules    []RuleException    `yaml:"rules"`
 	Packages []PackageException `yaml:"packages"`
@@ -77,10 +82,17 @@ type RuleException struct {
 }
 
 type PackageException struct {
-	Name      string   `yaml:"name"`
-	Reason    string   `yaml:"reason"`
-	Allows    []string `yaml:"allows"`
-	ExpiresAt string   `yaml:"expiresAt"`
+	Package    string   `yaml:"package,omitempty"`
+	Name       string   `yaml:"name,omitempty"`
+	Kind       string   `yaml:"kind,omitempty"`
+	Version    string   `yaml:"version,omitempty"`
+	Importer   string   `yaml:"importer,omitempty"`
+	RuleID     string   `yaml:"ruleId,omitempty"`
+	Reason     string   `yaml:"reason"`
+	ApprovedBy string   `yaml:"approvedBy,omitempty"`
+	ApprovedAt string   `yaml:"approvedAt,omitempty"`
+	Allows     []string `yaml:"allows,omitempty"`
+	ExpiresAt  string   `yaml:"expiresAt"`
 }
 
 // Default returns a Config with balanced-preset values.
@@ -131,6 +143,9 @@ func Default() *Config {
 				"Function",
 				"vm.Script",
 			},
+		},
+		Baseline: Baseline{
+			Path: ".guard/baseline.json",
 		},
 	}
 }

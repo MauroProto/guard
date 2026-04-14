@@ -5,14 +5,22 @@ import (
 	"flag"
 	"fmt"
 	"os"
+	"path/filepath"
 	"sort"
+	"strings"
 	"time"
 
 	"github.com/MauroProto/guard/internal/config"
 	"github.com/MauroProto/guard/internal/engine"
+	"github.com/MauroProto/guard/internal/gitutil"
 	"github.com/MauroProto/guard/internal/model"
 	"github.com/MauroProto/guard/internal/report"
 	"github.com/MauroProto/guard/internal/ui"
+)
+
+var (
+	scanRepo         = engine.ScanRepo
+	scanChangedFiles = gitutil.WorkingTreeChangedFiles
 )
 
 func runScan(args []string) error {
@@ -23,8 +31,12 @@ func runScan(args []string) error {
 	output := fs.String("output", "", "write output to file")
 	noColor := fs.Bool("no-color", false, "disable colored output")
 	failOn := fs.String("fail-on", "", "minimum severity to block: low|medium|high|critical")
+	scope := fs.String("scope", "all", "all|repo|workspace|deps|workflows|policy")
+	files := fs.String("files", "", "comma-separated repo-relative files to scan")
+	changedFiles := fs.Bool("changed-files", false, "scan only files changed relative to HEAD")
 	offline := fs.Bool("offline", false, "skip network-dependent checks")
 	noOSV := fs.Bool("no-osv", false, "skip OSV vulnerability lookup")
+	ignoreBaseline := fs.Bool("ignore-baseline", false, "ignore stored baseline entries")
 
 	if err := fs.Parse(args); err != nil {
 		return fmt.Errorf("%w: %v", ErrUsage, err)
@@ -34,10 +46,32 @@ func runScan(args []string) error {
 		ui.SetNoColor(true)
 	}
 
+	if *files != "" && *changedFiles {
+		return usageError("use either --files or --changed-files, not both")
+	}
+	if _, err := engine.ParseScanScope(*scope); err != nil {
+		return usageError(err.Error())
+	}
+
+	selectedFiles, err := resolveSelectedFiles(context.Background(), *root, *files, *changedFiles)
+	if err != nil {
+		return err
+	}
+
 	interactive := *format == "terminal" && *output == ""
 
 	if interactive {
-		return runScanInteractive(*root, *configPath, *failOn, *offline, *noOSV)
+		return runScanInteractive(scanRunConfig{
+			root:           *root,
+			configPath:     *configPath,
+			failOn:         *failOn,
+			scope:          *scope,
+			files:          selectedFiles,
+			changedFiles:   *changedFiles,
+			offline:        *offline,
+			noOSV:          *noOSV,
+			ignoreBaseline: *ignoreBaseline,
+		})
 	}
 
 	// Non-interactive: structured output only
@@ -46,16 +80,20 @@ func runScan(args []string) error {
 		return err
 	}
 	opts := &engine.ScanOptions{
-		Offline:    *offline,
-		DisableOSV: *noOSV,
+		Scope:        *scope,
+		Files:        selectedFiles,
+		ChangedFiles: *changedFiles,
+		Offline:      *offline,
+		DisableOSV:   *noOSV,
 	}
 	if *failOn != "" {
 		opts.FailOn = *failOn
 	}
-	rep, err := engine.ScanRepo(context.Background(), *root, cfg, opts)
+	rep, err := scanRepo(context.Background(), *root, cfg, opts)
 	if err != nil {
 		return err
 	}
+	applyBaselineToReport(*root, cfg, rep, *ignoreBaseline)
 
 	out, err := renderReport(rep, *format, *noColor)
 	if err != nil {
@@ -74,12 +112,24 @@ func runScan(args []string) error {
 	return nil
 }
 
-func runScanInteractive(root, configPath, failOn string, offline, noOSV bool) error {
+type scanRunConfig struct {
+	root           string
+	configPath     string
+	failOn         string
+	scope          string
+	files          []string
+	changedFiles   bool
+	offline        bool
+	noOSV          bool
+	ignoreBaseline bool
+}
+
+func runScanInteractive(run scanRunConfig) error {
 	ui.Header(engine.Version)
 
 	// Step 1: Load config
 	sp := ui.NewSpinner(ui.T("scan.checking") + " " + ui.T("scan.policy") + "...")
-	cfg, err := config.Load(root, configPath)
+	cfg, err := config.Load(run.root, run.configPath)
 	ui.Pause(400 * time.Millisecond)
 	if err != nil {
 		sp.StopFail(fmt.Sprintf("Config error: %v", err))
@@ -105,19 +155,23 @@ func runScanInteractive(root, configPath, failOn string, offline, noOSV bool) er
 	// Step 5: Scoring
 	sp = ui.NewSpinner(ui.T("scan.scoring") + "...")
 	opts := &engine.ScanOptions{
-		Offline:    offline,
-		DisableOSV: noOSV,
+		Scope:        run.scope,
+		Files:        run.files,
+		ChangedFiles: run.changedFiles,
+		Offline:      run.offline,
+		DisableOSV:   run.noOSV,
 	}
-	if failOn != "" {
-		opts.FailOn = failOn
+	if run.failOn != "" {
+		opts.FailOn = run.failOn
 	}
-	rep, err := engine.ScanRepo(context.Background(), root, cfg, opts)
+	rep, err := scanRepo(context.Background(), run.root, cfg, opts)
 	ui.Pause(250 * time.Millisecond)
 	if err != nil {
 		sp.StopFail(fmt.Sprintf("%v", err))
 		return err
 	}
 	sp.Stop()
+	applyBaselineToReport(run.root, cfg, rep, run.ignoreBaseline)
 
 	// Count categories
 	blocking := 0
@@ -221,6 +275,49 @@ func runScanInteractive(root, configPath, failOn string, offline, noOSV bool) er
 		return ErrPolicy
 	}
 	return nil
+}
+
+func resolveSelectedFiles(ctx context.Context, root, filesFlag string, changedFiles bool) ([]string, error) {
+	if changedFiles {
+		files, err := scanChangedFiles(ctx, root)
+		if err != nil {
+			return nil, fmt.Errorf("%w: resolve changed files: %v", ErrRuntime, err)
+		}
+		return normalizeFileList(files), nil
+	}
+	return parseFilesFlag(filesFlag), nil
+}
+
+func parseFilesFlag(value string) []string {
+	if strings.TrimSpace(value) == "" {
+		return nil
+	}
+	return normalizeFileList(strings.Split(value, ","))
+}
+
+func normalizeFileList(files []string) []string {
+	if len(files) == 0 {
+		return nil
+	}
+	seen := map[string]bool{}
+	normalized := make([]string, 0, len(files))
+	for _, file := range files {
+		file = strings.TrimSpace(file)
+		if file == "" {
+			continue
+		}
+		file = filepath.ToSlash(filepath.Clean(file))
+		if seen[file] {
+			continue
+		}
+		seen[file] = true
+		normalized = append(normalized, file)
+	}
+	if len(normalized) == 0 {
+		return nil
+	}
+	sort.Strings(normalized)
+	return normalized
 }
 
 type nextStep struct {

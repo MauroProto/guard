@@ -27,6 +27,11 @@ func TestRuleExceptionActive(t *testing.T) {
 			expect: true,
 		},
 		{
+			name:   "future expiry rfc3339",
+			ex:     config.RuleException{ID: "test", ExpiresAt: "2026-12-31T23:59:59Z"},
+			expect: true,
+		},
+		{
 			name:   "past expiry",
 			ex:     config.RuleException{ID: "test", ExpiresAt: "2026-01-01"},
 			expect: false,
@@ -50,6 +55,87 @@ func TestRuleExceptionActive(t *testing.T) {
 				t.Fatalf("expected %v, got %v", tt.expect, got)
 			}
 		})
+	}
+}
+
+func TestFilterExceptionsPackageScopeDoesNotMuteOtherKinds(t *testing.T) {
+	now := time.Date(2026, 4, 12, 12, 0, 0, 0, time.UTC)
+	cfg := &config.Config{
+		Exceptions: config.Exceptions{
+			Packages: []config.PackageException{
+				{
+					Package:    "sharp",
+					Name:       "sharp",
+					Kind:       "build_script",
+					Version:    "1.2.3",
+					Importer:   "apps/web",
+					RuleID:     "pnpm.allowBuilds.unreviewed",
+					Reason:     "approved build",
+					ApprovedAt: "2026-04-12T10:00:00Z",
+					ExpiresAt:  "2026-10-12T23:59:59Z",
+				},
+			},
+		},
+	}
+
+	findings := []model.Finding{
+		{
+			RuleID:   "pnpm.allowBuilds.unreviewed",
+			Severity: model.SeverityHigh,
+			Blocking: true,
+			Evidence: map[string]any{
+				"package":  "sharp",
+				"kind":     "build_script",
+				"version":  "1.2.3",
+				"importer": "apps/web",
+			},
+		},
+		{
+			RuleID:   "repo.nodeEngine.missing",
+			Severity: model.SeverityLow,
+			Blocking: false,
+			Evidence: map[string]any{
+				"package": "sharp",
+			},
+		},
+	}
+
+	result := FilterExceptions(cfg, findings, now)
+	if !result[0].Muted {
+		t.Fatal("expected matching build_script finding to be muted")
+	}
+	if result[1].Muted {
+		t.Fatal("did not expect unrelated finding to be muted")
+	}
+}
+
+func TestFilterExceptionsLegacyAllowsRemainsCompatible(t *testing.T) {
+	now := time.Date(2026, 4, 12, 12, 0, 0, 0, time.UTC)
+	cfg := &config.Config{
+		Exceptions: config.Exceptions{
+			Packages: []config.PackageException{
+				{
+					Name:      "sharp",
+					Allows:    []string{"build_script"},
+					ExpiresAt: "2026-10-12",
+				},
+			},
+		},
+	}
+
+	findings := []model.Finding{{
+		RuleID:   "pnpm.allowBuilds.unreviewed",
+		Severity: model.SeverityHigh,
+		Blocking: true,
+		Evidence: map[string]any{
+			"package": "sharp",
+			"kind":    "build_script",
+		},
+	}}
+
+	result := FilterExceptions(cfg, findings, now)
+	if !result[0].Muted {
+		t.Fatal("expected legacy allows exception to remain compatible")
 	}
 }
 
@@ -140,23 +226,36 @@ func TestAddPackageExceptionUpdatesExistingPackage(t *testing.T) {
 		Exceptions: config.Exceptions{
 			Packages: []config.PackageException{
 				{
+					Package:   "lodash",
 					Name:      "lodash",
+					Kind:      "build_script",
+					RuleID:    "pnpm.allowBuilds.unreviewed",
 					Reason:    "keep",
 					Allows:    []string{"build_script"},
-					ExpiresAt: "2026-12-31",
+					ExpiresAt: "2026-12-31T00:00:00Z",
 				},
 				{
+					Package:   "sharp",
 					Name:      "sharp",
+					Kind:      "build_script",
+					RuleID:    "pnpm.allowBuilds.unreviewed",
 					Reason:    "old reason",
 					Allows:    []string{"build_script"},
-					ExpiresAt: "2026-01-01",
+					ExpiresAt: "2026-01-01T00:00:00Z",
 				},
 			},
 		},
 	}
 
 	expiry := time.Date(2026, 10, 12, 0, 0, 0, 0, time.UTC)
-	AddPackageException(cfg, "sharp", "new reason", expiry)
+	AddPackageException(cfg, PackageApproval{
+		Package:    "sharp",
+		Kind:       "build_script",
+		RuleID:     "pnpm.allowBuilds.unreviewed",
+		Reason:     "new reason",
+		ApprovedAt: time.Date(2026, 4, 12, 0, 0, 0, 0, time.UTC),
+		ExpiresAt:  expiry,
+	})
 
 	if len(cfg.Exceptions.Packages) != 2 {
 		t.Fatalf("expected existing package exception to be updated in place, got %d entries", len(cfg.Exceptions.Packages))
@@ -167,13 +266,16 @@ func TestAddPackageExceptionUpdatesExistingPackage(t *testing.T) {
 	}
 
 	updated := cfg.Exceptions.Packages[1]
-	if updated.Name != "sharp" {
-		t.Fatalf("expected sharp exception to remain in place, got %q", updated.Name)
+	if updated.Package != "sharp" || updated.Name != "sharp" {
+		t.Fatalf("expected sharp exception to remain in place, got %+v", updated)
 	}
 	if updated.Reason != "new reason" {
 		t.Fatalf("expected reason to be updated, got %q", updated.Reason)
 	}
-	if updated.ExpiresAt != "2026-10-12" {
+	if updated.ExpiresAt != "2026-10-12T00:00:00Z" {
 		t.Fatalf("expected expiry to be updated, got %q", updated.ExpiresAt)
+	}
+	if updated.ApprovedAt != "2026-04-12T00:00:00Z" {
+		t.Fatalf("expected approvedAt to be updated, got %q", updated.ApprovedAt)
 	}
 }

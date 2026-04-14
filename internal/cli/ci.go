@@ -21,6 +21,7 @@ func runCI(args []string) error {
 	format := fs.String("format", "terminal", "terminal|json|sarif")
 	output := fs.String("output", "", "write output to file")
 	failOn := fs.String("fail-on", "", "minimum severity to block")
+	ignoreBaseline := fs.Bool("ignore-baseline", false, "ignore stored baseline entries")
 	if err := fs.Parse(args); err != nil {
 		return fmt.Errorf("%w: %v", ErrUsage, err)
 	}
@@ -64,6 +65,7 @@ func runCI(args []string) error {
 			return scanErr
 		}
 		sp.Stop()
+		applyBaselineToReport(*root, cfg, rep, *ignoreBaseline)
 
 		blocking := 0
 		for _, f := range rep.Findings {
@@ -100,6 +102,7 @@ func runCI(args []string) error {
 	if err != nil {
 		return err
 	}
+	applyBaselineToReport(*root, cfg, rep, *ignoreBaseline)
 
 	var out []byte
 	switch *format {

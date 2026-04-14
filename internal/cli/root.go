@@ -64,8 +64,16 @@ func Run(args []string) error {
 		return runCI(rest)
 	case "diff", "d":
 		return runDiff(rest)
+	case "review-pr", "review":
+		return runReviewPR(rest)
 	case "approve-build", "approve", "ab":
 		return runApproveBuild(rest)
+	case "baseline":
+		return runBaseline(rest)
+	case "explain":
+		return runExplain(rest)
+	case "policy":
+		return runPolicy(rest)
 	case "version", "v", "--version", "-v":
 		fmt.Printf("guard %s\n", engine.Version)
 		return nil
@@ -110,7 +118,11 @@ func printHelp() {
 	fmt.Fprintf(w, "    init, i       %s\n", t("cmd.init"))
 	fmt.Fprintf(w, "    ci, c         %s\n", t("cmd.ci"))
 	fmt.Fprintf(w, "    diff, d       %s\n", t("cmd.diff"))
+	fmt.Fprintf(w, "    review-pr     review dependency/workflow changes between git refs\n")
 	fmt.Fprintf(w, "    approve, ab   %s\n", t("cmd.approve"))
+	fmt.Fprintf(w, "    baseline      record a baseline of current findings\n")
+	fmt.Fprintf(w, "    explain       explain a rule ID or finding fingerprint\n")
+	fmt.Fprintf(w, "    policy        lint Guard policy/config\n")
 	fmt.Fprintf(w, "    version, v    %s\n", t("cmd.version"))
 	fmt.Fprintf(w, "    help, h       %s\n\n", t("cmd.help"))
 
@@ -125,7 +137,13 @@ func printHelp() {
 	fmt.Fprintf(w, "    guard fix             # %s\n", t("cmd.fix"))
 	fmt.Fprintf(w, "    guard init            # %s\n", t("cmd.init"))
 	fmt.Fprintf(w, "    guard s --format json # JSON\n")
+	fmt.Fprintf(w, "    guard s --scope workflows --files .github/workflows/ci.yml\n")
+	fmt.Fprintf(w, "    guard s --changed-files --format json\n")
 	fmt.Fprintf(w, "    guard d pkg@1.0..2.0  # %s\n", t("cmd.diff"))
+	fmt.Fprintf(w, "    guard review-pr       # review dependency/workflow changes\n")
+	fmt.Fprintf(w, "    guard baseline record # save a baseline of current findings\n")
+	fmt.Fprintf(w, "    guard explain <id>    # explain a rule or finding fingerprint\n")
+	fmt.Fprintf(w, "    guard policy lint     # Lint Guard policy/config\n")
 	fmt.Fprintf(w, "    guard ab sharp        # %s\n\n", t("cmd.approve"))
 
 	fmt.Fprintf(w, "  %s\n\n", t("help.hint_lang"))

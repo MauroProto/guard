@@ -1,0 +1,46 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+PLUGIN_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
+source "$PLUGIN_ROOT/scripts/common.sh"
+
+resolve_guard_binary() {
+  if [[ -n "${GUARD_BIN:-}" ]]; then
+    printf '%s\n' "$GUARD_BIN"
+    return 0
+  fi
+  command -v guard >/dev/null 2>&1 || return 1
+  command -v guard
+}
+
+version_gte() {
+  local current="$1"
+  local minimum="$2"
+  if [[ "$current" == "dev" || "$minimum" == "dev" ]]; then
+    return 0
+  fi
+  local first
+  first="$(printf '%s\n%s\n' "$minimum" "$current" | sort -V | head -n1)"
+  [[ "$first" == "$minimum" ]]
+}
+
+main() {
+  local guard_bin
+  if ! guard_bin="$(resolve_guard_binary)"; then
+    echo "guard plugin requires Guard CLI in PATH or GUARD_BIN." >&2
+    exit 1
+  fi
+
+  local current_version minimum_version
+  current_version="$("$guard_bin" version | awk '{print $2}')"
+  minimum_version="${GUARD_MIN_VERSION:-0.1.0}"
+  if ! version_gte "$current_version" "$minimum_version"; then
+    echo "guard plugin requires Guard CLI >= ${minimum_version}; found ${current_version}." >&2
+    exit 1
+  fi
+
+  exec "$guard_bin" "$@"
+}
+
+main "$@"

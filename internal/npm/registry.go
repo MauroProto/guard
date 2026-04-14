@@ -19,10 +19,15 @@ import (
 
 // VersionMetadata holds registry information about a specific package version.
 type VersionMetadata struct {
-	Name       string
-	Version    string
-	TarballURL string
-	Integrity  string
+	Name              string
+	Version           string
+	TarballURL        string
+	Integrity         string
+	RegistryHost      string
+	Publisher         string
+	Provenance        bool
+	TrustedPublishing bool
+	HasSignatures     bool
 }
 
 // Registry provides access to npm package metadata.
@@ -94,21 +99,41 @@ func loadCachedMetadataOr(path string, fallback error) (*VersionMetadata, error)
 
 func parseMetadata(b []byte) (*VersionMetadata, error) {
 	var payload struct {
-		Name    string `json:"name"`
-		Version string `json:"version"`
-		Dist    struct {
-			Tarball   string `json:"tarball"`
-			Integrity string `json:"integrity"`
+		Name              string `json:"name"`
+		Version           string `json:"version"`
+		Provenance        bool   `json:"provenance"`
+		TrustedPublishing bool   `json:"trustedPublishing"`
+		Dist              struct {
+			Tarball    string `json:"tarball"`
+			Integrity  string `json:"integrity"`
+			Provenance bool   `json:"provenance"`
+			Signatures []struct {
+				KeyID string `json:"keyid"`
+			} `json:"signatures"`
 		} `json:"dist"`
+		NPMUser struct {
+			Name string `json:"name"`
+		} `json:"_npmUser"`
 	}
 	if err := json.Unmarshal(b, &payload); err != nil {
 		return nil, err
 	}
+	registryHost := ""
+	if payload.Dist.Tarball != "" {
+		if parsed, err := url.Parse(payload.Dist.Tarball); err == nil {
+			registryHost = parsed.Host
+		}
+	}
 	return &VersionMetadata{
-		Name:       payload.Name,
-		Version:    payload.Version,
-		TarballURL: payload.Dist.Tarball,
-		Integrity:  payload.Dist.Integrity,
+		Name:              payload.Name,
+		Version:           payload.Version,
+		TarballURL:        payload.Dist.Tarball,
+		Integrity:         payload.Dist.Integrity,
+		RegistryHost:      registryHost,
+		Publisher:         payload.NPMUser.Name,
+		Provenance:        payload.Provenance || payload.Dist.Provenance,
+		TrustedPublishing: payload.TrustedPublishing,
+		HasSignatures:     len(payload.Dist.Signatures) > 0,
 	}, nil
 }
 

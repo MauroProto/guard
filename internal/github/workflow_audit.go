@@ -53,6 +53,9 @@ func auditSingleWorkflow(root, path string) []model.Finding {
 	relPath := rel(root, path)
 	rootMap := doc.Content[0]
 	var findings []model.Finding
+	events := extractEvents(mappingValue(rootMap, "on"))
+	publishDetected := workflowPublishes(rootMap)
+	attestationDetected := workflowHasAttestations(rootMap) || permissionsAllowAttestations(mappingValue(rootMap, "permissions"))
 
 	permissionsNode := mappingValue(rootMap, "permissions")
 	if permissionsNode == nil {
@@ -64,6 +67,11 @@ func auditSingleWorkflow(root, path string) []model.Finding {
 			Message:     "The workflow has no top-level permissions block.",
 			Remediation: "Add a top-level permissions block with the minimum scopes required.",
 			File:        relPath,
+			Evidence: map[string]any{
+				"event":                 events,
+				"publish_step_detected": publishDetected,
+				"attestation_detected":  attestationDetected,
+			},
 			Actions: []model.Action{
 				model.ManualAction("Add a top-level permissions block, for example permissions: { contents: read }."),
 			},
@@ -78,6 +86,12 @@ func auditSingleWorkflow(root, path string) []model.Finding {
 			Remediation: "Reduce the default token permissions and elevate only where required.",
 			File:        relPath,
 			Line:        permissionsNode.Line,
+			Evidence: map[string]any{
+				"event":                 events,
+				"permissions":           flattenPermissions(permissionsNode),
+				"publish_step_detected": publishDetected,
+				"attestation_detected":  attestationDetected,
+			},
 			Actions: []model.Action{
 				model.ManualAction("Tighten the top-level permissions block to read-only defaults."),
 			},
@@ -89,7 +103,10 @@ func auditSingleWorkflow(root, path string) []model.Finding {
 		for i := 0; i < len(jobsNode.Content); i += 2 {
 			jobName := jobsNode.Content[i].Value
 			jobNode := jobsNode.Content[i+1]
-			if jobPerms := mappingValue(jobNode, "permissions"); jobPerms != nil && hasBroadWrite(jobPerms) {
+			jobPublishes := jobPublishes(jobNode)
+			jobAttests := workflowHasAttestations(jobNode) || permissionsAllowAttestations(mappingValue(jobNode, "permissions")) || attestationDetected
+			jobPerms := mappingValue(jobNode, "permissions")
+			if jobPerms != nil && hasBroadWrite(jobPerms) {
 				findings = append(findings, model.Finding{
 					RuleID:      "github.workflow.job_permissions.broad",
 					Severity:    model.SeverityHigh,
@@ -99,14 +116,91 @@ func auditSingleWorkflow(root, path string) []model.Finding {
 					Remediation: "Reduce job-level permissions or justify the elevated access explicitly.",
 					File:        relPath,
 					Line:        jobPerms.Line,
+					Evidence: map[string]any{
+						"event":                 events,
+						"job":                   jobName,
+						"permissions":           flattenPermissions(jobPerms),
+						"publish_step_detected": jobPublishes,
+						"attestation_detected":  jobAttests,
+					},
 					Actions: []model.Action{
 						model.ManualAction("Review job-level write permissions and keep only the scopes that are strictly required."),
+					},
+				})
+			}
+			if jobPublishes && jobPerms != nil && hasBroadWrite(jobPerms) {
+				findings = append(findings, model.Finding{
+					RuleID:      "github.workflow.publish.permissions.broad",
+					Severity:    model.SeverityHigh,
+					Category:    model.CategoryGitHub,
+					Title:       "Publish job grants broad write access",
+					Message:     "A publish job grants broad write access to GITHUB_TOKEN.",
+					Remediation: "Reduce publish job permissions to the minimum scopes required.",
+					File:        relPath,
+					Line:        jobPerms.Line,
+					Evidence: map[string]any{
+						"event":                 events,
+						"job":                   jobName,
+						"permissions":           flattenPermissions(jobPerms),
+						"publish_step_detected": true,
+						"attestation_detected":  jobAttests,
+					},
+					Actions: []model.Action{
+						model.ManualAction("Limit publish job permissions to the scopes required for release."),
+					},
+				})
+			}
+			if containsEvent(events, "pull_request_target") && jobTouchesPRCode(jobNode) {
+				findings = append(findings, model.Finding{
+					RuleID:      "github.workflow.pull_request_target.unsafe",
+					Severity:    model.SeverityHigh,
+					Category:    model.CategoryGitHub,
+					Title:       "pull_request_target workflow may process untrusted PR code",
+					Message:     "This workflow uses pull_request_target and checks out or executes code in a job.",
+					Remediation: "Avoid checking out PR code in pull_request_target or split privileged actions into a trusted workflow.",
+					File:        relPath,
+					Evidence: map[string]any{
+						"event":                 events,
+						"job":                   jobName,
+						"publish_step_detected": jobPublishes,
+						"attestation_detected":  jobAttests,
+					},
+					Actions: []model.Action{
+						model.ManualAction("Review the pull_request_target trust boundary and avoid direct PR code execution."),
+					},
+				})
+			}
+			if containsEvent(events, "workflow_run") && (jobPublishes || hasBroadWrite(mappingValue(jobNode, "permissions"))) {
+				findings = append(findings, model.Finding{
+					RuleID:      "github.workflow.workflow_run.privileged",
+					Severity:    model.SeverityMedium,
+					Category:    model.CategoryGitHub,
+					Title:       "workflow_run can trigger a privileged follow-up job",
+					Message:     "This workflow_run job appears to cross a trust boundary into privileged work.",
+					Remediation: "Isolate privileged follow-up jobs and review the trust boundary explicitly.",
+					File:        relPath,
+					Evidence: map[string]any{
+						"event":                 events,
+						"job":                   jobName,
+						"permissions":           flattenPermissions(mappingValue(jobNode, "permissions")),
+						"publish_step_detected": jobPublishes,
+						"attestation_detected":  jobAttests,
+					},
+					Actions: []model.Action{
+						model.ManualAction("Review workflow_run trust boundaries before using it for privileged work."),
 					},
 				})
 			}
 
 			if uses := scalarValue(jobNode, "uses"); uses != "" {
 				if finding := unpinnedActionFinding(relPath, uses, mappingValue(jobNode, "uses")); finding != nil {
+					finding.Evidence = mergeEvidence(finding.Evidence, map[string]any{
+						"event":                 events,
+						"job":                   jobName,
+						"uses":                  uses,
+						"publish_step_detected": jobPublishes,
+						"attestation_detected":  jobAttests,
+					})
 					findings = append(findings, *finding)
 				}
 			}
@@ -116,15 +210,174 @@ func auditSingleWorkflow(root, path string) []model.Finding {
 				for _, step := range stepsNode.Content {
 					if uses := scalarValue(step, "uses"); uses != "" {
 						if finding := unpinnedActionFinding(relPath, uses, mappingValue(step, "uses")); finding != nil {
+							finding.Evidence = mergeEvidence(finding.Evidence, map[string]any{
+								"event":                 events,
+								"job":                   jobName,
+								"uses":                  uses,
+								"publish_step_detected": jobPublishes,
+								"attestation_detected":  jobAttests,
+							})
 							findings = append(findings, *finding)
 						}
 					}
 				}
 			}
+			if jobPublishes && !jobAttests {
+				findings = append(findings, model.Finding{
+					RuleID:      "github.workflow.publish.attestations.missing",
+					Severity:    model.SeverityMedium,
+					Category:    model.CategoryGitHub,
+					Title:       "Publish workflow lacks attestations",
+					Message:     "A publish/release step was detected without a matching attestation step or permission.",
+					Remediation: "Add artifact attestations to the publish workflow.",
+					File:        relPath,
+					Evidence: map[string]any{
+						"event":                 events,
+						"job":                   jobName,
+						"publish_step_detected": true,
+						"attestation_detected":  false,
+					},
+					Actions: []model.Action{
+						model.ManualAction("Add artifact attestations or provenance generation to the publish workflow."),
+					},
+				})
+			}
 		}
 	}
 
 	return findings
+}
+
+func extractEvents(node *yaml.Node) []string {
+	if node == nil {
+		return nil
+	}
+	var events []string
+	switch node.Kind {
+	case yaml.ScalarNode:
+		if value := strings.TrimSpace(node.Value); value != "" {
+			events = append(events, value)
+		}
+	case yaml.SequenceNode:
+		for _, child := range node.Content {
+			if value := strings.TrimSpace(child.Value); value != "" {
+				events = append(events, value)
+			}
+		}
+	case yaml.MappingNode:
+		for i := 0; i < len(node.Content); i += 2 {
+			if value := strings.TrimSpace(node.Content[i].Value); value != "" {
+				events = append(events, value)
+			}
+		}
+	}
+	return events
+}
+
+func containsEvent(events []string, target string) bool {
+	for _, event := range events {
+		if event == target {
+			return true
+		}
+	}
+	return false
+}
+
+func workflowPublishes(node *yaml.Node) bool {
+	if node == nil {
+		return false
+	}
+	stepsNode := mappingValue(node, "steps")
+	if stepsNode == nil || stepsNode.Kind != yaml.SequenceNode {
+		return false
+	}
+	for _, step := range stepsNode.Content {
+		if stepPublishes(step) {
+			return true
+		}
+	}
+	return false
+}
+
+func jobPublishes(node *yaml.Node) bool {
+	return workflowPublishes(node)
+}
+
+func stepPublishes(node *yaml.Node) bool {
+	run := strings.ToLower(scalarValue(node, "run"))
+	return strings.Contains(run, "npm publish") || strings.Contains(run, "pnpm publish")
+}
+
+func workflowHasAttestations(node *yaml.Node) bool {
+	if node == nil {
+		return false
+	}
+	stepsNode := mappingValue(node, "steps")
+	if stepsNode == nil || stepsNode.Kind != yaml.SequenceNode {
+		return false
+	}
+	for _, step := range stepsNode.Content {
+		uses := scalarValue(step, "uses")
+		run := strings.ToLower(scalarValue(step, "run"))
+		if strings.Contains(uses, "attest-build-provenance") || strings.Contains(run, "attest") {
+			return true
+		}
+	}
+	return false
+}
+
+func permissionsAllowAttestations(node *yaml.Node) bool {
+	if node == nil || node.Kind != yaml.MappingNode {
+		return false
+	}
+	for i := 0; i < len(node.Content); i += 2 {
+		scope := strings.TrimSpace(node.Content[i].Value)
+		value := strings.ToLower(strings.TrimSpace(node.Content[i+1].Value))
+		if scope == "attestations" && value == "write" {
+			return true
+		}
+	}
+	return false
+}
+
+func jobTouchesPRCode(node *yaml.Node) bool {
+	if node == nil {
+		return false
+	}
+	stepsNode := mappingValue(node, "steps")
+	if stepsNode == nil || stepsNode.Kind != yaml.SequenceNode {
+		return false
+	}
+	for _, step := range stepsNode.Content {
+		uses := scalarValue(step, "uses")
+		run := strings.TrimSpace(scalarValue(step, "run"))
+		if strings.HasPrefix(uses, "actions/checkout@") || run != "" {
+			return true
+		}
+	}
+	return false
+}
+
+func flattenPermissions(node *yaml.Node) map[string]string {
+	if node == nil || node.Kind != yaml.MappingNode {
+		return nil
+	}
+	out := map[string]string{}
+	for i := 0; i < len(node.Content); i += 2 {
+		out[node.Content[i].Value] = node.Content[i+1].Value
+	}
+	return out
+}
+
+func mergeEvidence(base map[string]any, extra map[string]any) map[string]any {
+	out := map[string]any{}
+	for k, v := range base {
+		out[k] = v
+	}
+	for k, v := range extra {
+		out[k] = v
+	}
+	return out
 }
 
 func unpinnedActionFinding(relPath, ref string, node *yaml.Node) *model.Finding {

@@ -1,6 +1,8 @@
 package model
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"strconv"
 	"strings"
@@ -123,6 +125,8 @@ type Finding struct {
 	Severity    Severity       `json:"severity" yaml:"severity"`
 	Category    string         `json:"category,omitempty" yaml:"category,omitempty"`
 	Package     string         `json:"package,omitempty" yaml:"package,omitempty"`
+	Fingerprint string         `json:"fingerprint,omitempty" yaml:"fingerprint,omitempty"`
+	Confidence  float64        `json:"confidence,omitempty" yaml:"confidence,omitempty"`
 	Title       string         `json:"title" yaml:"title"`
 	Message     string         `json:"message" yaml:"message"`
 	Remediation string         `json:"remediation,omitempty" yaml:"remediation,omitempty"`
@@ -166,6 +170,12 @@ func (f *Finding) Normalize() {
 			f.Package = pkg
 		}
 	}
+	if f.Confidence == 0 {
+		f.Confidence = 0.55
+	}
+	if f.Fingerprint == "" {
+		f.Fingerprint = stableFingerprint(*f)
+	}
 }
 
 // MarshalJSON keeps the deprecated command field available for old consumers.
@@ -183,6 +193,26 @@ func (f Finding) MarshalJSON() ([]byte, error) {
 	return json.Marshal(alias)
 }
 
+func stableFingerprint(f Finding) string {
+	evidence := map[string]any{}
+	for key, value := range f.Evidence {
+		evidence[key] = value
+	}
+	payload := map[string]any{
+		"rule_id":  f.RuleID,
+		"package":  f.Package,
+		"file":     f.File,
+		"category": f.Category,
+		"evidence": evidence,
+	}
+	raw, err := json.Marshal(payload)
+	if err != nil {
+		raw = []byte(f.RuleID + "\x00" + f.Package + "\x00" + f.File)
+	}
+	sum := sha256.Sum256(raw)
+	return hex.EncodeToString(sum[:])
+}
+
 // Summary holds finding counts by severity.
 type Summary struct {
 	Critical int `json:"critical"`
@@ -193,14 +223,15 @@ type Summary struct {
 
 // Report is the top-level output of a scan or CI run.
 type Report struct {
-	Tool      string    `json:"tool"`
-	Version   string    `json:"version"`
-	Root      string    `json:"root"`
-	Timestamp time.Time `json:"timestamp"`
-	Summary   Summary   `json:"summary"`
-	Score     int       `json:"score"`
-	Decision  string    `json:"decision"`
-	Findings  []Finding `json:"findings"`
+	SchemaVersion string    `json:"schemaVersion"`
+	Tool          string    `json:"tool"`
+	Version       string    `json:"version"`
+	Root          string    `json:"root"`
+	Timestamp     time.Time `json:"timestamp"`
+	Summary       Summary   `json:"summary"`
+	Score         int       `json:"score"`
+	Decision      string    `json:"decision"`
+	Findings      []Finding `json:"findings"`
 }
 
 // AddFinding appends a finding and updates the summary counters.
@@ -221,9 +252,62 @@ func (r *Report) AddFinding(f Finding) {
 
 // Normalize ensures compatibility fields are populated.
 func (r *Report) Normalize() {
+	if r.SchemaVersion == "" {
+		r.SchemaVersion = "1"
+	}
 	for i := range r.Findings {
 		r.Findings[i].Normalize()
 	}
+}
+
+// Recompute refreshes summary, score-neutral decision state, and compatibility fields after findings change.
+func (r *Report) Recompute() {
+	r.Normalize()
+	r.Summary = Summary{}
+	r.Decision = "pass"
+	for _, f := range r.Findings {
+		if f.Muted {
+			continue
+		}
+		switch f.Severity {
+		case SeverityCritical:
+			r.Summary.Critical++
+		case SeverityHigh:
+			r.Summary.High++
+		case SeverityMedium:
+			r.Summary.Medium++
+		default:
+			r.Summary.Low++
+		}
+		if f.Blocking {
+			r.Decision = "fail"
+		}
+	}
+	r.Score = ScoreFindings(r.Findings)
+}
+
+// ScoreFindings computes a capped risk score from non-muted findings.
+func ScoreFindings(findings []Finding) int {
+	total := 0
+	for _, f := range findings {
+		if f.Muted {
+			continue
+		}
+		switch f.Severity {
+		case SeverityCritical:
+			total += 40
+		case SeverityHigh:
+			total += 20
+		case SeverityMedium:
+			total += 8
+		default:
+			total += 3
+		}
+	}
+	if total > 100 {
+		return 100
+	}
+	return total
 }
 
 // HasBlockingFindings returns true if any non-muted finding is blocking.

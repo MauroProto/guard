@@ -20,50 +20,76 @@ import (
 
 // ScanOptions holds optional overrides for the scan.
 type ScanOptions struct {
-	FailOn     string
-	Offline    bool
-	DisableOSV bool
-	OSVClient  osv.Client
-	Now        time.Time
+	FailOn       string
+	Scope        string
+	Files        []string
+	ChangedFiles bool
+	Offline      bool
+	DisableOSV   bool
+	OSVClient    osv.Client
+	Now          time.Time
 }
 
 // ScanRepo runs all checks against the repository and returns a report.
 func ScanRepo(ctx context.Context, root string, cfg *config.Config, opts *ScanOptions) (*model.Report, error) {
 	report := NewReport(root)
 
-	state, err := repo.Inspect(root)
+	targets, err := ResolveScanTargets(cfg, opts)
 	if err != nil {
 		return nil, err
 	}
+	if !targets.Any() {
+		report.Normalize()
+		return report, nil
+	}
 
-	checkRepo(report, cfg, state)
-
-	if state.HasPNPMWorkspace {
-		ws, err := pnpm.Load(root)
+	var state *repo.State
+	if targets.NeedsRepoState() {
+		state, err = repo.Inspect(root, cfg.GitHub.WorkflowPaths)
 		if err != nil {
-			return nil, fmt.Errorf("load pnpm workspace: %w", err)
+			return nil, err
 		}
-		checkPNPM(report, cfg, ws)
-	} else {
-		report.AddFinding(model.Finding{
-			RuleID:      "pnpm.workspace.missing",
-			Severity:    model.SeverityMedium,
-			Category:    model.CategoryPNPM,
-			Title:       "pnpm-workspace.yaml is missing",
-			Message:     "Guard could not find pnpm-workspace.yaml.",
-			Remediation: "Create pnpm-workspace.yaml and define your supply chain defaults.",
-			Actions: []model.Action{
-				model.ManualAction("Create pnpm-workspace.yaml with your workspace package globs and security defaults."),
-			},
-		})
 	}
 
-	for _, f := range github.AuditWorkflows(root, state.WorkflowFiles) {
-		report.AddFinding(f)
+	if targets.RepoStructure || targets.PackageMetadata {
+		checkRepo(report, cfg, state, targets)
 	}
 
-	if cfg.GitHub.RequireCodeownersForWorkflows && len(state.WorkflowFiles) > 0 && !state.HasCodeowners {
-		report.AddFinding(model.Finding{
+	if targets.WorkspacePosture || targets.BuildApprovals {
+		if state.HasPNPMWorkspace {
+			ws, err := pnpm.Load(root)
+			if err != nil {
+				return nil, fmt.Errorf("load pnpm workspace: %w", err)
+			}
+			if targets.WorkspacePosture {
+				checkWorkspacePosture(report, cfg, ws)
+			}
+			if targets.BuildApprovals {
+				checkPendingBuildApprovals(report, cfg, root, ws)
+			}
+		} else if targets.WorkspacePosture {
+			addFinding(report, cfg, model.Finding{
+				RuleID:      "pnpm.workspace.missing",
+				Severity:    model.SeverityMedium,
+				Category:    model.CategoryPNPM,
+				Title:       "pnpm-workspace.yaml is missing",
+				Message:     "Guard could not find pnpm-workspace.yaml.",
+				Remediation: "Create pnpm-workspace.yaml and define your supply chain defaults.",
+				Actions: []model.Action{
+					model.ManualAction("Create pnpm-workspace.yaml with your workspace package globs and security defaults."),
+				},
+			})
+		}
+	}
+
+	if targets.WorkflowAudit {
+		for _, f := range github.AuditWorkflows(root, selectWorkflowFiles(root, state.WorkflowFiles, targets)) {
+			addFinding(report, cfg, f)
+		}
+	}
+
+	if targets.WorkflowCodeowners && len(state.WorkflowFiles) > 0 && !state.HasCodeowners {
+		addFinding(report, cfg, model.Finding{
 			RuleID:      "github.workflow.codeowners.missing",
 			Severity:    model.SeverityMedium,
 			Category:    model.CategoryGitHub,
@@ -77,11 +103,17 @@ func ScanRepo(ctx context.Context, root string, cfg *config.Config, opts *ScanOp
 		})
 	}
 
-	if shouldScanOSV(cfg, opts) {
+	if targets.PolicyLint {
+		for _, finding := range scanPolicy(root, cfg) {
+			addFinding(report, cfg, finding)
+		}
+	}
+
+	if targets.OSV && shouldScanOSV(cfg, opts) {
 		client := optsOSVClient(root, opts)
 		if client != nil {
 			for _, finding := range scanOSV(ctx, root, cfg, client) {
-				report.AddFinding(finding)
+				addFinding(report, cfg, finding)
 			}
 		}
 	}
@@ -124,9 +156,51 @@ func ScanRepo(ctx context.Context, root string, cfg *config.Config, opts *ScanOp
 	return report, nil
 }
 
-func checkRepo(report *model.Report, cfg *config.Config, state *repo.State) {
-	if !state.HasPackageJSON {
-		report.AddFinding(model.Finding{
+func selectWorkflowFiles(root string, files []string, targets ScanTargets) []string {
+	if !targets.WorkflowAudit || len(files) == 0 || targets.WorkflowFiles == nil {
+		return files
+	}
+	selected := make([]string, 0, len(files))
+	for _, abs := range files {
+		rel, err := filepath.Rel(root, abs)
+		if err != nil {
+			continue
+		}
+		if targets.IncludesWorkflowFile(rel) {
+			selected = append(selected, abs)
+		}
+	}
+	return selected
+}
+
+func scanPolicy(root string, cfg *config.Config) []model.Finding {
+	issues := config.Lint(root, cfg)
+	findings := make([]model.Finding, 0, len(issues))
+	for _, issue := range issues {
+		severity := model.SeverityLow
+		if issue.Severity == "error" {
+			severity = model.SeverityHigh
+		}
+		findings = append(findings, model.Finding{
+			RuleID:      issue.Code,
+			Severity:    severity,
+			Category:    model.CategoryPolicy,
+			Title:       "Guard policy issue",
+			Message:     issue.Message,
+			Remediation: "Run `guard policy lint` and narrow the field or exception that Guard flagged.",
+			File:        filepath.ToSlash(config.DefaultPolicyPath),
+			Evidence: map[string]any{
+				"path":          issue.Path,
+				"lint_severity": issue.Severity,
+			},
+		})
+	}
+	return findings
+}
+
+func checkRepo(report *model.Report, cfg *config.Config, state *repo.State, targets ScanTargets) {
+	if targets.RepoStructure && !state.HasPackageJSON {
+		addFinding(report, cfg, model.Finding{
 			RuleID:      "repo.package_json.missing",
 			Severity:    model.SeverityHigh,
 			Category:    model.CategoryRepo,
@@ -140,8 +214,8 @@ func checkRepo(report *model.Report, cfg *config.Config, state *repo.State) {
 		})
 	}
 
-	if cfg.PNPM.RequireLockfile && !state.HasPNPMLockfile {
-		report.AddFinding(model.Finding{
+	if targets.RepoStructure && cfg.PNPM.RequireLockfile && !state.HasPNPMLockfile {
+		addFinding(report, cfg, model.Finding{
 			RuleID:      "repo.lockfile.missing",
 			Severity:    model.SeverityHigh,
 			Category:    model.CategoryRepo,
@@ -155,16 +229,25 @@ func checkRepo(report *model.Report, cfg *config.Config, state *repo.State) {
 		})
 	}
 
+	if !targets.PackageMetadata {
+		return
+	}
+
 	for _, pkg := range state.Packages {
+		if !targets.IncludesPackageFile(pkg.RelFile) {
+			continue
+		}
 		pkgLabel := packageLabel(pkg)
 		pkgEvidence := map[string]any{
 			"package":      pkgLabel,
+			"version":      pkg.PackageJSON.Version,
+			"importer":     pkg.RelDir,
 			"package_file": pkg.RelFile,
 			"package_dir":  pkg.RelDir,
 		}
 
 		if cfg.PNPM.RequirePackageManagerField && pkg.PackageJSON != nil && pkg.PackageJSON.PackageManager == "" {
-			report.AddFinding(model.Finding{
+			addFinding(report, cfg, model.Finding{
 				RuleID:      "repo.packageManager.unpinned",
 				Severity:    model.SeverityMedium,
 				Category:    model.CategoryRepo,
@@ -183,7 +266,7 @@ func checkRepo(report *model.Report, cfg *config.Config, state *repo.State) {
 		if cfg.PNPM.RequireNodeEngine && pkg.PackageJSON != nil {
 			_, hasNode := pkg.PackageJSON.Engines["node"]
 			if !hasNode {
-				report.AddFinding(model.Finding{
+				addFinding(report, cfg, model.Finding{
 					RuleID:      "repo.nodeEngine.missing",
 					Severity:    model.SeverityLow,
 					Category:    model.CategoryRepo,
@@ -202,9 +285,9 @@ func checkRepo(report *model.Report, cfg *config.Config, state *repo.State) {
 	}
 }
 
-func checkPNPM(report *model.Report, cfg *config.Config, ws *pnpm.Workspace) {
+func checkWorkspacePosture(report *model.Report, cfg *config.Config, ws *pnpm.Workspace) {
 	if cfg.PNPM.MinimumReleaseAgeMinutes > 0 && ws.MinimumReleaseAge == 0 {
-		report.AddFinding(model.Finding{
+		addFinding(report, cfg, model.Finding{
 			RuleID:      "pnpm.minimumReleaseAge.missing",
 			Severity:    model.SeverityHigh,
 			Category:    model.CategoryPNPM,
@@ -216,7 +299,7 @@ func checkPNPM(report *model.Report, cfg *config.Config, ws *pnpm.Workspace) {
 			},
 		})
 	} else if ws.MinimumReleaseAge > 0 && ws.MinimumReleaseAge < cfg.PNPM.MinimumReleaseAgeMinutes {
-		report.AddFinding(model.Finding{
+		addFinding(report, cfg, model.Finding{
 			RuleID:      "pnpm.minimumReleaseAge.too_low",
 			Severity:    model.SeverityMedium,
 			Category:    model.CategoryPNPM,
@@ -231,7 +314,7 @@ func checkPNPM(report *model.Report, cfg *config.Config, ws *pnpm.Workspace) {
 	}
 
 	if cfg.PNPM.BlockExoticSubdeps && !ws.BlockExoticSubdeps {
-		report.AddFinding(model.Finding{
+		addFinding(report, cfg, model.Finding{
 			RuleID:      "pnpm.blockExoticSubdeps.disabled",
 			Severity:    model.SeverityHigh,
 			Category:    model.CategoryPNPM,
@@ -245,7 +328,7 @@ func checkPNPM(report *model.Report, cfg *config.Config, ws *pnpm.Workspace) {
 	}
 
 	if cfg.PNPM.StrictDepBuilds && !ws.StrictDepBuilds {
-		report.AddFinding(model.Finding{
+		addFinding(report, cfg, model.Finding{
 			RuleID:      "pnpm.strictDepBuilds.disabled",
 			Severity:    model.SeverityHigh,
 			Category:    model.CategoryPNPM,
@@ -259,7 +342,7 @@ func checkPNPM(report *model.Report, cfg *config.Config, ws *pnpm.Workspace) {
 	}
 
 	if cfg.PNPM.TrustPolicy == "no-downgrade" && ws.TrustPolicy != "no-downgrade" {
-		report.AddFinding(model.Finding{
+		addFinding(report, cfg, model.Finding{
 			RuleID:      "pnpm.trustPolicy.disabled",
 			Severity:    model.SeverityMedium,
 			Category:    model.CategoryPNPM,
@@ -272,34 +355,76 @@ func checkPNPM(report *model.Report, cfg *config.Config, ws *pnpm.Workspace) {
 		})
 	}
 
+}
+
+func checkPendingBuildApprovals(report *model.Report, cfg *config.Config, root string, ws *pnpm.Workspace) {
+	var lock *lockfile.PNPM
+	if loaded, err := lockfile.Load(filepath.Join(root, "pnpm-lock.yaml")); err == nil {
+		lock = loaded
+	}
 	for name, allowed := range ws.AllowBuilds {
 		if allowed {
 			continue
 		}
-		actions := []model.Action{
-			model.ManualAction(fmt.Sprintf("Review %s and approve or remove it from allowBuilds.", name)),
+		refs := lockfile.ResolvePackageRefs(lock, name)
+		if len(refs) == 0 {
+			addFinding(report, cfg, buildApprovalFinding(name, "", ""))
+			continue
 		}
-		if npm.ValidPackageName(name) {
-			actions = append([]model.Action{
-				model.ExecAction(
-					fmt.Sprintf("Approve build scripts for %s.", name),
-					[]string{"guard", "approve-build", name},
-					true,
-					false,
-				),
-			}, actions...)
+		for _, ref := range refs {
+			addFinding(report, cfg, buildApprovalFinding(name, ref.Version, ref.Importer))
 		}
-		report.AddFinding(model.Finding{
-			RuleID:      "pnpm.allowBuilds.unreviewed",
-			Severity:    model.SeverityHigh,
-			Category:    model.CategoryPNPM,
-			Package:     name,
-			Title:       "A package has a pending build approval",
-			Message:     fmt.Sprintf("allowBuilds contains %q=false.", name),
-			Remediation: "Review the package and approve or remove it.",
-			Actions:     actions,
-			Evidence:    map[string]any{"package": name},
-		})
+	}
+}
+
+func buildApprovalFinding(name, version, importer string) model.Finding {
+	actions := []model.Action{
+		model.ManualAction(fmt.Sprintf("Review %s and approve or remove it from allowBuilds.", name)),
+	}
+	if npm.ValidPackageName(name) {
+		argv := []string{"guard", "approve-build", name}
+		if importer != "" {
+			argv = append(argv, "--importer", importer)
+		}
+		if version != "" {
+			argv = append(argv, "--version", version)
+		}
+		actions = append([]model.Action{
+			model.ExecAction(
+				fmt.Sprintf("Approve build scripts for %s.", name),
+				argv,
+				true,
+				false,
+			),
+		}, actions...)
+	}
+
+	evidence := map[string]any{
+		"package": name,
+		"kind":    "build_script",
+	}
+	if version != "" {
+		evidence["version"] = version
+	}
+	if importer != "" {
+		evidence["importer"] = importer
+	}
+
+	message := fmt.Sprintf("allowBuilds contains %q=false.", name)
+	if importer != "" || version != "" {
+		message = fmt.Sprintf("allowBuilds contains %q=false for importer %q version %q.", name, importer, version)
+	}
+
+	return model.Finding{
+		RuleID:      "pnpm.allowBuilds.unreviewed",
+		Severity:    model.SeverityHigh,
+		Category:    model.CategoryPNPM,
+		Package:     name,
+		Title:       "A package has a pending build approval",
+		Message:     message,
+		Remediation: "Review the package and approve or remove it.",
+		Actions:     actions,
+		Evidence:    evidence,
 	}
 }
 

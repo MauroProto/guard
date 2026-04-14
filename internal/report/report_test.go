@@ -57,6 +57,9 @@ func TestJSONRoundTrip(t *testing.T) {
 	if parsed.Decision != "fail" {
 		t.Fatalf("expected decision fail, got %s", parsed.Decision)
 	}
+	if parsed.SchemaVersion == "" {
+		t.Fatal("expected schemaVersion to be set")
+	}
 }
 
 func TestSARIFStructure(t *testing.T) {

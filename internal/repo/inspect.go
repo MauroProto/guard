@@ -11,9 +11,18 @@ import (
 
 // PackageJSON holds the fields Guard cares about.
 type PackageJSON struct {
-	Name           string            `json:"name"`
-	PackageManager string            `json:"packageManager"`
-	Engines        map[string]string `json:"engines"`
+	Name                 string            `json:"name"`
+	Version              string            `json:"version"`
+	PackageManager       string            `json:"packageManager"`
+	Engines              map[string]string `json:"engines"`
+	Scripts              map[string]string `json:"scripts"`
+	Private              bool              `json:"private"`
+	PublishConfig        map[string]any    `json:"publishConfig"`
+	Bin                  any               `json:"bin"`
+	Dependencies         map[string]any    `json:"dependencies"`
+	DevDependencies      map[string]any    `json:"devDependencies"`
+	PeerDependencies     map[string]any    `json:"peerDependencies"`
+	OptionalDependencies map[string]any    `json:"optionalDependencies"`
 }
 
 // PackageState describes a discovered package.json in the repository.
@@ -38,7 +47,7 @@ type State struct {
 }
 
 // Inspect reads the repo root and returns a State snapshot.
-func Inspect(root string) (*State, error) {
+func Inspect(root string, workflowPaths []string) (*State, error) {
 	s := &State{Root: root}
 	seenPackages := map[string]bool{}
 
@@ -55,20 +64,9 @@ func Inspect(root string) (*State, error) {
 	if _, err := os.Stat(filepath.Join(root, "pnpm-workspace.yaml")); err == nil {
 		s.HasPNPMWorkspace = true
 		if ws, loadErr := pnpm.Load(root); loadErr == nil {
-			for _, pattern := range ws.Packages {
-				matches, globErr := filepath.Glob(filepath.Join(root, filepath.FromSlash(pattern)))
-				if globErr != nil {
-					continue
-				}
-				for _, match := range matches {
-					info, statErr := os.Stat(match)
-					if statErr != nil {
-						continue
-					}
-					dir := match
-					if !info.IsDir() {
-						dir = filepath.Dir(match)
-					}
+			dirs, resolveErr := pnpm.ResolvePackageDirs(root, ws.Packages)
+			if resolveErr == nil {
+				for _, dir := range dirs {
 					pkg, pkgErr := loadPackage(root, dir)
 					if pkgErr != nil || seenPackages[pkg.RelDir] {
 						continue
@@ -94,16 +92,21 @@ func Inspect(root string) (*State, error) {
 		}
 	}
 
-	workflowRoot := filepath.Join(root, ".github", "workflows")
-	_ = filepath.Walk(workflowRoot, func(path string, info os.FileInfo, err error) error {
-		if err == nil && !info.IsDir() {
-			ext := filepath.Ext(path)
-			if ext == ".yml" || ext == ".yaml" {
-				s.WorkflowFiles = append(s.WorkflowFiles, path)
+	if len(workflowPaths) == 0 {
+		workflowPaths = []string{".github/workflows"}
+	}
+	for _, rel := range workflowPaths {
+		workflowRoot := filepath.Join(root, filepath.FromSlash(rel))
+		_ = filepath.Walk(workflowRoot, func(path string, info os.FileInfo, err error) error {
+			if err == nil && !info.IsDir() {
+				ext := filepath.Ext(path)
+				if ext == ".yml" || ext == ".yaml" {
+					s.WorkflowFiles = append(s.WorkflowFiles, path)
+				}
 			}
-		}
-		return nil
-	})
+			return nil
+		})
+	}
 
 	sort.Slice(s.Packages, func(i, j int) bool {
 		return s.Packages[i].RelDir < s.Packages[j].RelDir

@@ -141,4 +141,7 @@ func TestCompareUsesEmptySignalsSliceWhenClean(t *testing.T) {
 	if result.Signals == nil {
 		t.Fatal("expected empty slice, got nil")
 	}
+	if result.SchemaVersion == "" {
+		t.Fatal("expected schemaVersion to be set")
+	}
 }

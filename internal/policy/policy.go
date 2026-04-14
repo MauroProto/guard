@@ -9,26 +9,12 @@ import (
 
 // RuleExceptionActive returns true if the exception has not expired.
 func RuleExceptionActive(now time.Time, ex config.RuleException) bool {
-	if ex.ExpiresAt == "" {
-		return true
-	}
-	t, err := time.Parse("2006-01-02", ex.ExpiresAt)
-	if err != nil {
-		return false
-	}
-	return now.Before(t) || now.Equal(t)
+	return exceptionActive(now, ex.ExpiresAt)
 }
 
 // PackageExceptionActive returns true if the package exception has not expired.
 func PackageExceptionActive(now time.Time, ex config.PackageException) bool {
-	if ex.ExpiresAt == "" {
-		return true
-	}
-	t, err := time.Parse("2006-01-02", ex.ExpiresAt)
-	if err != nil {
-		return false
-	}
-	return now.Before(t) || now.Equal(t)
+	return exceptionActive(now, ex.ExpiresAt)
 }
 
 // FilterExceptions applies rule and package exceptions to findings.
@@ -62,28 +48,27 @@ func FilterExceptions(cfg *config.Config, findings []model.Finding, now time.Tim
 			}
 		}
 
-		// Check package exceptions (using Evidence["package"] if present)
+		// Check package exceptions with scoped matching.
 		if !muted {
-			if pkgName, ok := f.Evidence["package"].(string); ok {
-				for _, ex := range cfg.Exceptions.Packages {
-					if ex.Name == pkgName {
-						if PackageExceptionActive(now, ex) {
-							f.Muted = true
-							f.Blocking = false
-						} else {
-							result = append(result, model.Finding{
-								RuleID:      "policy.exception.expired",
-								Severity:    model.SeverityHigh,
-								Category:    model.CategoryPolicy,
-								Title:       "Package exception has expired",
-								Message:     "Exception for package " + ex.Name + " expired on " + ex.ExpiresAt + ".",
-								Remediation: "Remove the exception or set a new expiration date.",
-								Blocking:    true,
-							})
-						}
-						break
-					}
+			for _, ex := range cfg.Exceptions.Packages {
+				if !matchesPackageException(ex, f) {
+					continue
 				}
+				if PackageExceptionActive(now, ex) {
+					f.Muted = true
+					f.Blocking = false
+				} else {
+					result = append(result, model.Finding{
+						RuleID:      "policy.exception.expired",
+						Severity:    model.SeverityHigh,
+						Category:    model.CategoryPolicy,
+						Title:       "Package exception has expired",
+						Message:     "Exception for package " + packageExceptionName(ex) + " expired on " + ex.ExpiresAt + ".",
+						Remediation: "Remove the exception or set a new expiration date.",
+						Blocking:    true,
+					})
+				}
+				break
 			}
 		}
 
@@ -91,6 +76,72 @@ func FilterExceptions(cfg *config.Config, findings []model.Finding, now time.Tim
 	}
 
 	return result
+}
+
+func exceptionActive(now time.Time, expiresAt string) bool {
+	if expiresAt == "" {
+		return true
+	}
+	if t, err := time.Parse(time.RFC3339, expiresAt); err == nil {
+		return now.Before(t) || now.Equal(t)
+	}
+	t, err := time.Parse("2006-01-02", expiresAt)
+	if err != nil {
+		return false
+	}
+	// Legacy date-only exceptions stay active until the end of the specified day.
+	return now.Before(t.Add(24*time.Hour)) || now.Equal(t.Add(24*time.Hour))
+}
+
+func matchesPackageException(ex config.PackageException, f model.Finding) bool {
+	if f.Evidence == nil {
+		return false
+	}
+	if pkg := packageExceptionName(ex); pkg != "" && evidenceString(f.Evidence, "package") != pkg {
+		return false
+	}
+	if kind := packageExceptionKind(ex); kind != "" && evidenceString(f.Evidence, "kind") != kind {
+		return false
+	}
+	if ex.Version != "" && evidenceString(f.Evidence, "version") != ex.Version {
+		return false
+	}
+	if ex.Importer != "" && evidenceString(f.Evidence, "importer") != ex.Importer {
+		return false
+	}
+	if ex.RuleID != "" && f.RuleID != ex.RuleID {
+		return false
+	}
+	return packageExceptionName(ex) != ""
+}
+
+func packageExceptionName(ex config.PackageException) string {
+	if ex.Package != "" {
+		return ex.Package
+	}
+	return ex.Name
+}
+
+func packageExceptionKind(ex config.PackageException) string {
+	if ex.Kind != "" {
+		return ex.Kind
+	}
+	for _, allowed := range ex.Allows {
+		if allowed == "build_script" {
+			return "build_script"
+		}
+	}
+	return ""
+}
+
+func evidenceString(evidence map[string]any, key string) string {
+	if evidence == nil {
+		return ""
+	}
+	if value, ok := evidence[key].(string); ok {
+		return value
+	}
+	return ""
 }
 
 // ApplyFailOn sets Blocking=true for all non-muted findings at or above the threshold.

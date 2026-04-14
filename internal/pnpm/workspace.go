@@ -3,6 +3,8 @@ package pnpm
 import (
 	"os"
 	"path/filepath"
+	"sort"
+	"strings"
 
 	"github.com/MauroProto/guard/internal/yamlutil"
 	"gopkg.in/yaml.v3"
@@ -78,4 +80,54 @@ func Save(root string, ws *Workspace) error {
 		return err
 	}
 	return os.WriteFile(path, out, 0o644)
+}
+
+// ResolvePackageDirs expands workspace patterns into an ordered set of package directories.
+func ResolvePackageDirs(root string, patterns []string) ([]string, error) {
+	included := map[string]bool{}
+	var ordered []string
+
+	for _, pattern := range patterns {
+		exclude := strings.HasPrefix(pattern, "!")
+		if exclude {
+			pattern = strings.TrimPrefix(pattern, "!")
+		}
+		pattern = filepath.Clean(filepath.FromSlash(pattern))
+		matches, err := filepath.Glob(filepath.Join(root, pattern))
+		if err != nil {
+			return nil, err
+		}
+		sort.Strings(matches)
+		for _, match := range matches {
+			info, err := os.Stat(match)
+			if err != nil {
+				continue
+			}
+			dir := match
+			if !info.IsDir() {
+				dir = filepath.Dir(match)
+			}
+			rel, err := filepath.Rel(root, dir)
+			if err != nil || strings.HasPrefix(rel, "..") {
+				continue
+			}
+			if exclude {
+				delete(included, dir)
+				continue
+			}
+			if included[dir] {
+				continue
+			}
+			included[dir] = true
+			ordered = append(ordered, dir)
+		}
+	}
+
+	result := ordered[:0]
+	for _, dir := range ordered {
+		if included[dir] {
+			result = append(result, dir)
+		}
+	}
+	return result, nil
 }

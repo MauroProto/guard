@@ -59,6 +59,25 @@ func runDiff(args []string) error {
 
 	cfg, _ := config.Load(*root, "")
 	suspiciousAPIs := cfg.Diff.SuspiciousAPIs
+	if !cfg.Diff.Enabled {
+		result := &diffpkg.DiffResult{
+			SchemaVersion: "1",
+			Target:        *target,
+			Signals:       []diffpkg.Signal{},
+			Score:         0,
+			Summary:       "Diff analysis disabled by policy.",
+			Disabled:      true,
+		}
+		out, err := renderDiff(result, *format)
+		if err != nil {
+			return err
+		}
+		if *output != "" {
+			return os.WriteFile(*output, out, 0o644)
+		}
+		fmt.Print(string(out))
+		return nil
+	}
 
 	var from, to *diffpkg.PackageContents
 
@@ -137,9 +156,18 @@ func runDiff(args []string) error {
 		return err
 	}
 	if *output != "" {
-		return os.WriteFile(*output, out, 0o644)
+		if err := os.WriteFile(*output, out, 0o644); err != nil {
+			return err
+		}
+		if diffShouldBlock(result, cfg.Diff.FailOnSignals) {
+			return ErrPolicy
+		}
+		return nil
 	}
 	fmt.Print(string(out))
+	if diffShouldBlock(result, cfg.Diff.FailOnSignals) {
+		return ErrPolicy
+	}
 	return nil
 }
 
@@ -238,4 +266,20 @@ func diffMarkdown(r *diffpkg.DiffResult) string {
 		s += fmt.Sprintf("| %s | `%s` | %s | %s |\n", sig.Severity, sig.ID, sig.Title, file)
 	}
 	return s
+}
+
+func diffShouldBlock(result *diffpkg.DiffResult, failOnSignals []string) bool {
+	if result == nil || result.Disabled || len(result.Signals) == 0 {
+		return false
+	}
+	normalized := map[string]bool{}
+	for _, signal := range failOnSignals {
+		normalized[diffpkg.NormalizeSignalName(signal)] = true
+	}
+	for _, signal := range result.Signals {
+		if normalized[signal.ID] {
+			return true
+		}
+	}
+	return false
 }
