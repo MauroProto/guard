@@ -14,6 +14,11 @@ It combines:
 - policy validation and exceptions,
 - machine-readable output for CI and automation.
 
+Links:
+
+- [Changelog](./CHANGELOG.md)
+- [Releases](https://github.com/MauroProto/guard/releases)
+
 <p align="center">
   <img src="https://img.shields.io/badge/go-%3E%3D1.23-blue" alt="Go 1.23+">
   <img src="https://img.shields.io/badge/pnpm-supported-orange" alt="pnpm">
