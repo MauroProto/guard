@@ -9,6 +9,7 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"fmt"
+	"hash"
 	"io"
 	"net/http"
 	"os"
@@ -138,23 +139,27 @@ func verifyIntegrity(path, integrity string) error {
 		return err
 	}
 
-	b, err := os.ReadFile(path)
+	file, err := os.Open(path)
 	if err != nil {
 		return err
 	}
+	defer file.Close()
 
-	var actual []byte
+	var hasher hash.Hash
 	switch parts[0] {
 	case "sha512":
-		sum := sha512.Sum512(b)
-		actual = sum[:]
+		hasher = sha512.New()
 	case "sha256":
-		sum := sha256.Sum256(b)
-		actual = sum[:]
+		hasher = sha256.New()
 	default:
 		return fmt.Errorf("unsupported integrity algorithm %q", parts[0])
 	}
-	if !bytesEqual(actual, expected) {
+
+	if _, err := io.Copy(hasher, file); err != nil {
+		return err
+	}
+
+	if !bytesEqual(hasher.Sum(nil), expected) {
 		return fmt.Errorf("tarball integrity mismatch for %s", filepath.Base(path))
 	}
 	return nil
