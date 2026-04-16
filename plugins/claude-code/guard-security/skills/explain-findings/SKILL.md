@@ -1,7 +1,7 @@
 ---
 name: explain-findings
 description: Use this skill when Guard emitted findings and Claude should explain the rule, evidence, blocking status, and next safe step.
-version: 0.1.0
+version: 0.2.1
 ---
 
 # Explain Findings

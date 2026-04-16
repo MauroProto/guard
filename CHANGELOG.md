@@ -4,6 +4,20 @@ All notable changes to Guard will be documented in this file.
 
 The format is based on Keep a Changelog and this project follows SemVer.
 
+## [0.2.1] - 2026-04-15
+
+### Changed
+
+- Claude Code plugin version bumped to `0.2.1` so marketplace updates are visible immediately in clients
+- plugin hook runtime now watches external plugin, skill, MCP, and extension install commands with low-noise `ask` behavior in `balanced`
+- plugin strict mode now denies only clear remote bootstrap commands that download code and execute it inline, instead of broadly blocking unfamiliar agent tooling
+
+### Fixed
+
+- plugin update detection in Claude Code now has a fresh marketplace/plugin version to upgrade against
+- plugin smoke and structure checks now cover agent-install and remote-bootstrap command filters consistently
+- plugin state and reporting now persist focused risk for external agent-tooling commands without breaking normal MCP or skill usage
+
 ## [0.2.0] - 2026-04-14
 
 ### Added

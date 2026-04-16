@@ -1,7 +1,7 @@
 ---
 name: review-dependencies
 description: Use this skill when package.json, pnpm-lock.yaml, or dependency mutation commands changed the supply-chain surface and Guard should review dependency risk.
-version: 0.1.0
+version: 0.2.1
 ---
 
 # Review Dependencies

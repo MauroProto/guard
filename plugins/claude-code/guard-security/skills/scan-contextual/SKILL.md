@@ -1,7 +1,7 @@
 ---
 name: scan-contextual
 description: Use this skill when dependency, workflow, workspace, or policy files changed and Claude needs a focused Guard scan instead of a full repository scan.
-version: 0.1.0
+version: 0.2.1
 ---
 
 # Scan Contextual

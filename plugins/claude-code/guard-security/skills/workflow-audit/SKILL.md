@@ -1,7 +1,7 @@
 ---
 name: workflow-audit
 description: Use this skill when GitHub Actions workflows or CODEOWNERS changed and Claude should run a focused Guard workflow audit.
-version: 0.1.0
+version: 0.2.1
 ---
 
 # Workflow Audit
