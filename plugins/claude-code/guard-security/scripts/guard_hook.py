@@ -13,7 +13,7 @@ from pathlib import Path
 from typing import Any
 
 
-SCOPES = ("deps", "workspace", "policy", "workflows")
+SCOPES = ("deps", "workspace", "policy", "workflows", "agent")
 DEFAULT_WORKFLOW_DIRS = [".github/workflows"]
 DEFAULT_MODE = "balanced"
 
@@ -125,6 +125,7 @@ def default_scope_state() -> dict[str, Any]:
         "last_run_at": "",
         "report_path": "",
         "last_files": [],
+        "last_command": "",
         "last_error": "",
         "needs_attention": False,
     }
@@ -315,6 +316,14 @@ class Runtime:
             if package_json.parent != root:
                 values.append(str(package_json.parent))
         return unique_sorted(values)
+
+
+@dataclass(frozen=True)
+class CommandAssessment:
+    scan_scopes: tuple[str, ...]
+    agent_risk: str = ""
+    summary: str = ""
+    reason: str = ""
 
 
 def parse_simple_list_block(lines: list[str], start: int, indent: int) -> tuple[list[str], int]:
@@ -554,6 +563,7 @@ def update_scope_from_scan(
     target["last_run_at"] = now_utc()
     target["report_path"] = str(report_path) if report_path else ""
     target["last_files"] = files or []
+    target["last_command"] = ""
     target["last_error"] = error
     target["needs_attention"] = bool(needs_attention and status == "blocking")
 
@@ -565,6 +575,53 @@ def mark_pending(runtime: Runtime, scope: str, trigger: str) -> None:
     target["pending"] = True
     target["last_trigger"] = trigger
     target["needs_attention"] = False
+
+
+def write_json_report(path: Path | None, payload: dict[str, Any]) -> None:
+    if path is None:
+        return
+    path.write_text(json.dumps(payload, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+
+
+def update_agent_scope(
+    runtime: Runtime,
+    *,
+    assessment: CommandAssessment,
+    trigger: str,
+    command: str,
+) -> tuple[str, str]:
+    if runtime.state is None:
+        return "clean", ""
+    status = "blocking" if assessment.agent_risk == "remote_exec" else "warning"
+    blocking = 1 if status == "blocking" else 0
+    warnings = 1 if status == "warning" else 0
+    report_path = runtime.report_path("agent")
+    report = {
+        "schemaVersion": 1,
+        "tool": "guard.plugin.agent",
+        "generatedAt": now_utc(),
+        "repoRoot": str(runtime.repo_root) if runtime.repo_root else "",
+        "command": command,
+        "trigger": trigger,
+        "risk": assessment.agent_risk,
+        "status": status,
+        "summary": assessment.summary,
+        "reason": assessment.reason,
+    }
+    write_json_report(report_path, report)
+    target = runtime.scope_state("agent")
+    target["status"] = status
+    target["pending"] = False
+    target["blocking_count"] = blocking
+    target["warning_count"] = warnings
+    target["last_trigger"] = trigger
+    target["last_run_at"] = now_utc()
+    target["report_path"] = str(report_path) if report_path else ""
+    target["last_files"] = []
+    target["last_command"] = command
+    target["last_error"] = ""
+    target["needs_attention"] = status == "blocking" and trigger in {"post_bash", "post_write"}
+    return status, assessment.summary
 
 
 def extract_command(event: dict[str, Any]) -> str:
@@ -599,6 +656,114 @@ def command_scopes(command: str) -> list[str]:
     if re.match(r"^(pnpm|npm)\s+(add|up|install|remove|update|uninstall)(\s|$)", text):
         return ["deps"]
     return []
+
+
+AGENT_INSTALL_PATTERNS: tuple[tuple[re.Pattern[str], str, str], ...] = (
+    (
+        re.compile(r"^claude\s+plugins\s+marketplace\s+add(\s|$)", re.IGNORECASE),
+        "plugin marketplace",
+        "adds a Claude plugin marketplace that can later install external code",
+    ),
+    (
+        re.compile(r"^claude\s+plugins\s+install(\s|$)", re.IGNORECASE),
+        "plugin install",
+        "installs an external Claude plugin",
+    ),
+    (
+        re.compile(r"^claude\s+mcp\s+add(\s|$)", re.IGNORECASE),
+        "mcp install",
+        "registers an MCP server that can execute commands or expose new capabilities",
+    ),
+    (
+        re.compile(r"^codex\s+plugins\s+marketplace\s+add(\s|$)", re.IGNORECASE),
+        "plugin marketplace",
+        "adds a plugin marketplace that can later install external code",
+    ),
+    (
+        re.compile(r"^codex\s+plugins\s+install(\s|$)", re.IGNORECASE),
+        "plugin install",
+        "installs an external plugin",
+    ),
+    (
+        re.compile(r"^codex\s+mcp\s+add(\s|$)", re.IGNORECASE),
+        "mcp install",
+        "registers an MCP server that can execute commands or expose new capabilities",
+    ),
+    (
+        re.compile(r"^codex\s+skills\s+install(\s|$)", re.IGNORECASE),
+        "skill install",
+        "installs an external skill package",
+    ),
+    (
+        re.compile(r"^npx(?:\s+-\S+)*\s+skills\s+add(\s|$)", re.IGNORECASE),
+        "skill install",
+        "downloads and installs an external skill package through npx",
+    ),
+    (
+        re.compile(r"^gemini\s+extensions\s+install(\s|$)", re.IGNORECASE),
+        "extension install",
+        "installs an external extension package",
+    ),
+)
+
+
+def detect_remote_bootstrap(command: str) -> CommandAssessment | None:
+    text = command.strip()
+    if not text:
+        return None
+    lowered = text.lower()
+    shell_pipe = re.search(r"\|\s*(sh|bash|zsh)\b", lowered)
+    shell_expand = any(token in text for token in ("<(", "$("))
+    if "curl" in lowered and shell_pipe:
+        return CommandAssessment(
+            scan_scopes=(),
+            agent_risk="remote_exec",
+            summary="Guard noticed a remote bootstrap command that downloads code and executes it inline.",
+            reason="this command downloads code with curl and pipes it directly into a shell",
+        )
+    if "wget" in lowered and shell_pipe:
+        return CommandAssessment(
+            scan_scopes=(),
+            agent_risk="remote_exec",
+            summary="Guard noticed a remote bootstrap command that downloads code and executes it inline.",
+            reason="this command downloads code with wget and pipes it directly into a shell",
+        )
+    if shell_expand and re.search(r"\b(sh|bash|zsh)\b", lowered) and re.search(r"\b(curl|wget)\b", lowered):
+        return CommandAssessment(
+            scan_scopes=(),
+            agent_risk="remote_exec",
+            summary="Guard noticed a remote bootstrap command that downloads code and executes it inline.",
+            reason="this command expands remote curl/wget output inside a shell invocation",
+        )
+    return None
+
+
+def detect_agent_install(command: str) -> CommandAssessment | None:
+    text = command.strip()
+    if not text:
+        return None
+    for pattern, label, reason in AGENT_INSTALL_PATTERNS:
+        if pattern.search(text):
+            return CommandAssessment(
+                scan_scopes=(),
+                agent_risk="ecosystem_install",
+                summary=f"Guard noticed an external {label} command.",
+                reason=reason,
+            )
+    return None
+
+
+def assess_command(command: str) -> CommandAssessment:
+    scan_scopes = tuple(command_scopes(command))
+    risk = detect_remote_bootstrap(command) or detect_agent_install(command)
+    if risk is None:
+        return CommandAssessment(scan_scopes=scan_scopes)
+    return CommandAssessment(
+        scan_scopes=scan_scopes,
+        agent_risk=risk.agent_risk,
+        summary=risk.summary,
+        reason=risk.reason,
+    )
 
 
 def run_scan(
@@ -678,6 +843,7 @@ def run_policy_review(runtime: Runtime, *, trigger: str, files: list[str] | None
     target["pending"] = False
     target["needs_attention"] = combined_status == "blocking" and trigger in {"post_write", "post_bash"}
     target["last_files"] = files or []
+    target["last_command"] = ""
     target["lint_report_path"] = str(lint_report_path) if lint_report_path else ""
     if lint_data is None and lint_stderr:
         target["last_error"] = lint_stderr
@@ -710,7 +876,7 @@ def session_start(runtime: Runtime) -> dict[str, Any] | None:
     return {
         "hookSpecificOutput": {
             "hookEventName": "SessionStart",
-            "additionalContext": f"Guard active in {runtime.mode} mode for this repo. Focused reviews cover deps, workflows, policy, and workspace changes.",
+            "additionalContext": f"Guard active in {runtime.mode} mode for this repo. Focused reviews cover deps, workflows, policy, workspace changes, and risky agent install commands.",
         }
     }
 
@@ -742,8 +908,9 @@ def pre_bash(runtime: Runtime) -> dict[str, Any] | None:
     if runtime.repo_root is None or runtime.state is None:
         return None
     command = extract_command(runtime.event)
-    scopes = command_scopes(command)
-    if not scopes:
+    assessment = assess_command(command)
+    scopes = list(assessment.scan_scopes)
+    if not scopes and not assessment.agent_risk:
         return None
 
     blocking_scopes: list[str] = []
@@ -756,6 +923,13 @@ def pre_bash(runtime: Runtime) -> dict[str, Any] | None:
             pending_scopes.append(scope)
 
     if runtime.mode == "observe":
+        if assessment.agent_risk:
+            return {
+                "hookSpecificOutput": {
+                    "hookEventName": "PreToolUse",
+                    "additionalContext": f"Guard note before `{command}`: {assessment.summary} Review the source and requested permissions before continuing.",
+                }
+            }
         if blocking_scopes or pending_scopes:
             details = []
             if blocking_scopes:
@@ -769,6 +943,36 @@ def pre_bash(runtime: Runtime) -> dict[str, Any] | None:
                 }
             }
         return None
+
+    if assessment.agent_risk == "remote_exec" and runtime.mode == "strict":
+        return {
+            "hookSpecificOutput": {
+                "hookEventName": "PreToolUse",
+                "permissionDecision": "deny",
+                "permissionDecisionReason": "Guard strict mode blocked a remote bootstrap command because it downloads code and executes it inline.",
+                "additionalContext": "Inspect the script first or install from a release, registry, or repository you trust.",
+            }
+        }
+
+    if assessment.agent_risk == "remote_exec":
+        return {
+            "hookSpecificOutput": {
+                "hookEventName": "PreToolUse",
+                "permissionDecision": "ask",
+                "permissionDecisionReason": "Guard wants confirmation before this command because it downloads code and executes it inline.",
+                "additionalContext": assessment.summary + " Prefer inspecting the script before running it.",
+            }
+        }
+
+    if assessment.agent_risk == "ecosystem_install":
+        return {
+            "hookSpecificOutput": {
+                "hookEventName": "PreToolUse",
+                "permissionDecision": "ask",
+                "permissionDecisionReason": "Guard wants confirmation before this command because it installs or registers external agent tooling.",
+                "additionalContext": assessment.summary + " Check the source, manifest, and permissions before trusting the new tool.",
+            }
+        }
 
     if runtime.mode == "strict" and blocking_scopes:
         return {
@@ -830,19 +1034,29 @@ def post_write(runtime: Runtime) -> dict[str, Any] | None:
 def post_bash(runtime: Runtime) -> dict[str, Any] | None:
     if runtime.repo_root is None or runtime.state is None:
         return None
-    available, _ = runtime.guard_available()
-    if not available:
-        return None
     command = extract_command(runtime.event)
-    scopes = command_scopes(command)
-    if not scopes:
+    assessment = assess_command(command)
+    scopes = list(assessment.scan_scopes)
+    if not scopes and not assessment.agent_risk:
         return None
 
+    available, _ = runtime.guard_available()
     messages: list[str] = []
-    for scope in scopes:
-        status, _, _, summary = run_scan(runtime, scope, trigger="post_bash", changed_files=True)
-        if status in {"blocking", "warning", "error"}:
+    if assessment.agent_risk:
+        _, summary = update_agent_scope(
+            runtime,
+            assessment=assessment,
+            trigger="post_bash",
+            command=command,
+        )
+        if summary:
             messages.append(summary)
+
+    if available:
+        for scope in scopes:
+            status, _, _, summary = run_scan(runtime, scope, trigger="post_bash", changed_files=True)
+            if status in {"blocking", "warning", "error"}:
+                messages.append(summary)
 
     runtime.state["watch_paths"] = runtime.compute_watch_paths()
     runtime.save_state()

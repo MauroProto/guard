@@ -96,6 +96,7 @@ When enabled, it reacts to the right moments:
   - runs focused Guard scans in JSON mode for affected surfaces.
 - `PreToolUse` on `Bash`
   - watches dependency mutation commands such as `pnpm add`, `pnpm up`, `pnpm install`, `npm install`, and `corepack use`.
+  - also intercepts high-risk agent install commands such as plugin, skill, and MCP installs, plus clear remote bootstrap patterns like `curl ... | sh`.
 - `Stop`
   - summarizes pending or blocking Guard scopes.
 
@@ -104,6 +105,7 @@ V1 behavior is intentionally balanced:
 - no full scans on every event,
 - no auto-fix from hooks,
 - no blanket Bash blocking,
+- no generic MCP or skill killing just because a command looks unfamiliar,
 - no dependence on paths outside the installed plugin bundle.
 
 ### One-off local plugin testing

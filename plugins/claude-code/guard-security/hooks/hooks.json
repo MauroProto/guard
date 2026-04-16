@@ -75,6 +75,111 @@
             "type": "command",
             "if": "Bash(corepack use*)",
             "command": "${CLAUDE_PLUGIN_ROOT}/scripts/pre_bash_guard.sh"
+          },
+          {
+            "type": "command",
+            "if": "Bash(claude plugins marketplace add*)",
+            "command": "${CLAUDE_PLUGIN_ROOT}/scripts/pre_bash_guard.sh"
+          },
+          {
+            "type": "command",
+            "if": "Bash(claude plugins install*)",
+            "command": "${CLAUDE_PLUGIN_ROOT}/scripts/pre_bash_guard.sh"
+          },
+          {
+            "type": "command",
+            "if": "Bash(claude mcp add*)",
+            "command": "${CLAUDE_PLUGIN_ROOT}/scripts/pre_bash_guard.sh"
+          },
+          {
+            "type": "command",
+            "if": "Bash(codex plugins marketplace add*)",
+            "command": "${CLAUDE_PLUGIN_ROOT}/scripts/pre_bash_guard.sh"
+          },
+          {
+            "type": "command",
+            "if": "Bash(codex plugins install*)",
+            "command": "${CLAUDE_PLUGIN_ROOT}/scripts/pre_bash_guard.sh"
+          },
+          {
+            "type": "command",
+            "if": "Bash(codex mcp add*)",
+            "command": "${CLAUDE_PLUGIN_ROOT}/scripts/pre_bash_guard.sh"
+          },
+          {
+            "type": "command",
+            "if": "Bash(codex skills install*)",
+            "command": "${CLAUDE_PLUGIN_ROOT}/scripts/pre_bash_guard.sh"
+          },
+          {
+            "type": "command",
+            "if": "Bash(npx skills add*)",
+            "command": "${CLAUDE_PLUGIN_ROOT}/scripts/pre_bash_guard.sh"
+          },
+          {
+            "type": "command",
+            "if": "Bash(gemini extensions install*)",
+            "command": "${CLAUDE_PLUGIN_ROOT}/scripts/pre_bash_guard.sh"
+          },
+          {
+            "type": "command",
+            "if": "Bash(curl*bash*)",
+            "command": "${CLAUDE_PLUGIN_ROOT}/scripts/pre_bash_guard.sh"
+          },
+          {
+            "type": "command",
+            "if": "Bash(curl*sh*)",
+            "command": "${CLAUDE_PLUGIN_ROOT}/scripts/pre_bash_guard.sh"
+          },
+          {
+            "type": "command",
+            "if": "Bash(curl*zsh*)",
+            "command": "${CLAUDE_PLUGIN_ROOT}/scripts/pre_bash_guard.sh"
+          },
+          {
+            "type": "command",
+            "if": "Bash(wget*bash*)",
+            "command": "${CLAUDE_PLUGIN_ROOT}/scripts/pre_bash_guard.sh"
+          },
+          {
+            "type": "command",
+            "if": "Bash(wget*sh*)",
+            "command": "${CLAUDE_PLUGIN_ROOT}/scripts/pre_bash_guard.sh"
+          },
+          {
+            "type": "command",
+            "if": "Bash(wget*zsh*)",
+            "command": "${CLAUDE_PLUGIN_ROOT}/scripts/pre_bash_guard.sh"
+          },
+          {
+            "type": "command",
+            "if": "Bash(bash*curl*)",
+            "command": "${CLAUDE_PLUGIN_ROOT}/scripts/pre_bash_guard.sh"
+          },
+          {
+            "type": "command",
+            "if": "Bash(sh*curl*)",
+            "command": "${CLAUDE_PLUGIN_ROOT}/scripts/pre_bash_guard.sh"
+          },
+          {
+            "type": "command",
+            "if": "Bash(zsh*curl*)",
+            "command": "${CLAUDE_PLUGIN_ROOT}/scripts/pre_bash_guard.sh"
+          },
+          {
+            "type": "command",
+            "if": "Bash(bash*wget*)",
+            "command": "${CLAUDE_PLUGIN_ROOT}/scripts/pre_bash_guard.sh"
+          },
+          {
+            "type": "command",
+            "if": "Bash(sh*wget*)",
+            "command": "${CLAUDE_PLUGIN_ROOT}/scripts/pre_bash_guard.sh"
+          },
+          {
+            "type": "command",
+            "if": "Bash(zsh*wget*)",
+            "command": "${CLAUDE_PLUGIN_ROOT}/scripts/pre_bash_guard.sh"
           }
         ]
       }
@@ -138,6 +243,132 @@
           {
             "type": "command",
             "if": "Bash(corepack use*)",
+            "async": true,
+            "command": "${CLAUDE_PLUGIN_ROOT}/scripts/post_bash_guard.sh"
+          },
+          {
+            "type": "command",
+            "if": "Bash(claude plugins marketplace add*)",
+            "async": true,
+            "command": "${CLAUDE_PLUGIN_ROOT}/scripts/post_bash_guard.sh"
+          },
+          {
+            "type": "command",
+            "if": "Bash(claude plugins install*)",
+            "async": true,
+            "command": "${CLAUDE_PLUGIN_ROOT}/scripts/post_bash_guard.sh"
+          },
+          {
+            "type": "command",
+            "if": "Bash(claude mcp add*)",
+            "async": true,
+            "command": "${CLAUDE_PLUGIN_ROOT}/scripts/post_bash_guard.sh"
+          },
+          {
+            "type": "command",
+            "if": "Bash(codex plugins marketplace add*)",
+            "async": true,
+            "command": "${CLAUDE_PLUGIN_ROOT}/scripts/post_bash_guard.sh"
+          },
+          {
+            "type": "command",
+            "if": "Bash(codex plugins install*)",
+            "async": true,
+            "command": "${CLAUDE_PLUGIN_ROOT}/scripts/post_bash_guard.sh"
+          },
+          {
+            "type": "command",
+            "if": "Bash(codex mcp add*)",
+            "async": true,
+            "command": "${CLAUDE_PLUGIN_ROOT}/scripts/post_bash_guard.sh"
+          },
+          {
+            "type": "command",
+            "if": "Bash(codex skills install*)",
+            "async": true,
+            "command": "${CLAUDE_PLUGIN_ROOT}/scripts/post_bash_guard.sh"
+          },
+          {
+            "type": "command",
+            "if": "Bash(npx skills add*)",
+            "async": true,
+            "command": "${CLAUDE_PLUGIN_ROOT}/scripts/post_bash_guard.sh"
+          },
+          {
+            "type": "command",
+            "if": "Bash(gemini extensions install*)",
+            "async": true,
+            "command": "${CLAUDE_PLUGIN_ROOT}/scripts/post_bash_guard.sh"
+          },
+          {
+            "type": "command",
+            "if": "Bash(curl*bash*)",
+            "async": true,
+            "command": "${CLAUDE_PLUGIN_ROOT}/scripts/post_bash_guard.sh"
+          },
+          {
+            "type": "command",
+            "if": "Bash(curl*sh*)",
+            "async": true,
+            "command": "${CLAUDE_PLUGIN_ROOT}/scripts/post_bash_guard.sh"
+          },
+          {
+            "type": "command",
+            "if": "Bash(curl*zsh*)",
+            "async": true,
+            "command": "${CLAUDE_PLUGIN_ROOT}/scripts/post_bash_guard.sh"
+          },
+          {
+            "type": "command",
+            "if": "Bash(wget*bash*)",
+            "async": true,
+            "command": "${CLAUDE_PLUGIN_ROOT}/scripts/post_bash_guard.sh"
+          },
+          {
+            "type": "command",
+            "if": "Bash(wget*sh*)",
+            "async": true,
+            "command": "${CLAUDE_PLUGIN_ROOT}/scripts/post_bash_guard.sh"
+          },
+          {
+            "type": "command",
+            "if": "Bash(wget*zsh*)",
+            "async": true,
+            "command": "${CLAUDE_PLUGIN_ROOT}/scripts/post_bash_guard.sh"
+          },
+          {
+            "type": "command",
+            "if": "Bash(bash*curl*)",
+            "async": true,
+            "command": "${CLAUDE_PLUGIN_ROOT}/scripts/post_bash_guard.sh"
+          },
+          {
+            "type": "command",
+            "if": "Bash(sh*curl*)",
+            "async": true,
+            "command": "${CLAUDE_PLUGIN_ROOT}/scripts/post_bash_guard.sh"
+          },
+          {
+            "type": "command",
+            "if": "Bash(zsh*curl*)",
+            "async": true,
+            "command": "${CLAUDE_PLUGIN_ROOT}/scripts/post_bash_guard.sh"
+          },
+          {
+            "type": "command",
+            "if": "Bash(bash*wget*)",
+            "async": true,
+            "command": "${CLAUDE_PLUGIN_ROOT}/scripts/post_bash_guard.sh"
+          },
+          {
+            "type": "command",
+            "if": "Bash(sh*wget*)",
+            "async": true,
+            "command": "${CLAUDE_PLUGIN_ROOT}/scripts/post_bash_guard.sh"
+          },
+          {
+            "type": "command",
+            "if": "Bash(zsh*wget*)",
             "async": true,
             "command": "${CLAUDE_PLUGIN_ROOT}/scripts/post_bash_guard.sh"
           }

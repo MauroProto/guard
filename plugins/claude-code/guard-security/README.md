@@ -8,6 +8,7 @@ Guard stays a CLI-first security tool. This plugin adds a Claude Code runtime th
 - The Claude Code plugin is an orchestration layer.
 - Hooks consume the real Claude hook protocol: JSON on stdin and JSON on stdout.
 - The plugin uses focused `guard scan --scope ...` calls instead of full scans on every event.
+- The plugin also watches high-risk agent bootstrap commands so docs-driven plugin, skill, or MCP installs do not execute blindly.
 
 ## Installation
 
@@ -45,17 +46,21 @@ Set the mode with `GUARD_PLUGIN_MODE`.
 ### `observe`
 - never blocks
 - never asks for confirmation
-- adds lightweight context when a risky command runs with blocking findings or pending review
+- adds lightweight context when a risky command runs with blocking findings, pending review, or remote bootstrap risk
 
 ### `balanced` (default)
 - optimized for day-to-day development
 - asks before sensitive dependency/workspace commands only when Guard already has blocking findings or pending focused review for the relevant scope
+- asks before external plugin, skill, MCP, or extension install commands
+- asks before remote bootstrap commands that download code and execute it inline
 - runs focused scans asynchronously after sensitive writes and dependency mutation commands
 - `Stop` acts as a safety net only for fresh blocking results from sensitive changes
 
 ### `strict`
 - denies sensitive dependency/workspace commands when relevant blocking Guard results are already active
+- denies remote bootstrap commands that download code and execute it inline
 - asks when a focused review is still pending
+- asks before external plugin, skill, MCP, or extension install commands
 - blocks `Stop` on fresh blocking results and on critical pending review that has not been addressed yet
 
 ## What the plugin watches
@@ -98,8 +103,18 @@ Commands covered in V1:
 - `npm update`
 - `npm uninstall`
 - `corepack use`
+- `claude plugins marketplace add`
+- `claude plugins install`
+- `claude mcp add`
+- `codex plugins marketplace add`
+- `codex plugins install`
+- `codex mcp add`
+- `codex skills install`
+- `npx skills add`
+- `gemini extensions install`
+- common remote bootstrap patterns such as `curl ... | sh`, `wget ... | bash`, or `bash <(curl ...)`
 
-This hook does not run for generic Bash. In `balanced` and `strict`, it only intervenes when there is already a real Guard reason to do so.
+This hook still does not run for generic Bash. It only intercepts dependency mutation commands, agent ecosystem install commands, and clear remote-bootstrap patterns.
 
 ### `PostToolUse` on `Write|Edit`
 - async
@@ -113,6 +128,7 @@ This hook does not run for generic Bash. In `balanced` and `strict`, it only int
 ### `PostToolUse` on sensitive Bash
 - async
 - closes the loop after dependency/workspace mutation commands
+- records focused agent-install or remote-bootstrap risk when those commands actually run
 - uses `--changed-files` when possible to stay focused
 
 ### `Stop`
@@ -127,6 +143,8 @@ This hook does not run for generic Bash. In `balanced` and `strict`, it only int
 - does not auto-approve build scripts or permissions
 - does not run full scans on every change
 - does not block generic Bash traffic
+- does not kill MCPs, skills, or plugins just because they are unfamiliar
+- does not claim to sandbox arbitrary repositories or all external tooling
 - does not bootstrap binaries automatically
 
 ## Development

@@ -109,6 +109,7 @@ for event, entries in hooks.get("hooks", {}).items():
                 raise SystemExit(f"{event} hook script is not executable: {target}")
 
 pre_bash_ifs = []
+post_bash_ifs = []
 post_bash_async = False
 post_write_async = False
 for entry in hooks["hooks"].get("PreToolUse", []):
@@ -119,6 +120,7 @@ for entry in hooks["hooks"].get("PostToolUse", []):
         post_write_async = any(hook.get("async") for hook in entry.get("hooks", []))
     if entry.get("matcher") == "Bash":
         post_bash_async = any(hook.get("async") for hook in entry.get("hooks", []))
+        post_bash_ifs.extend(hook.get("if", "") for hook in entry.get("hooks", []))
 
 expected_ifs = {
     "Bash(pnpm add*)",
@@ -129,9 +131,32 @@ expected_ifs = {
     "Bash(npm update*)",
     "Bash(npm uninstall*)",
     "Bash(corepack use*)",
+    "Bash(claude plugins marketplace add*)",
+    "Bash(claude plugins install*)",
+    "Bash(claude mcp add*)",
+    "Bash(codex plugins marketplace add*)",
+    "Bash(codex plugins install*)",
+    "Bash(codex mcp add*)",
+    "Bash(codex skills install*)",
+    "Bash(npx skills add*)",
+    "Bash(gemini extensions install*)",
+    "Bash(curl*bash*)",
+    "Bash(curl*sh*)",
+    "Bash(curl*zsh*)",
+    "Bash(wget*bash*)",
+    "Bash(wget*sh*)",
+    "Bash(wget*zsh*)",
+    "Bash(bash*curl*)",
+    "Bash(sh*curl*)",
+    "Bash(zsh*curl*)",
+    "Bash(bash*wget*)",
+    "Bash(sh*wget*)",
+    "Bash(zsh*wget*)",
 }
 if missing := sorted(expected_ifs - set(pre_bash_ifs)):
     raise SystemExit("PreToolUse Bash is missing command filters: " + ", ".join(missing))
+if missing := sorted(expected_ifs - set(post_bash_ifs)):
+    raise SystemExit("PostToolUse Bash is missing command filters: " + ", ".join(missing))
 if not post_write_async:
     raise SystemExit("PostToolUse Write|Edit hook must be async")
 if not post_bash_async:
