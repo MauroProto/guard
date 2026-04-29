@@ -57,6 +57,7 @@ required_skills = [
     "skills/workflow-audit/SKILL.md",
     "skills/approve-build-guided/SKILL.md",
     "skills/explain-findings/SKILL.md",
+    "skills/agent-audit/SKILL.md",
 ]
 for rel in required_skills:
     path = os.path.join(plugin_root, rel)

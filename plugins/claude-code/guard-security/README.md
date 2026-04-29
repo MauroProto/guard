@@ -9,6 +9,7 @@ Guard stays a CLI-first security tool. This plugin adds a Claude Code runtime th
 - Hooks consume the real Claude hook protocol: JSON on stdin and JSON on stdout.
 - The plugin uses focused `guard scan --scope ...` calls instead of full scans on every event.
 - The plugin also watches high-risk agent bootstrap commands so docs-driven plugin, skill, or MCP installs do not execute blindly.
+- The CLI can audit already-installed MCPs, skills, plugins, and hooks with `guard agent audit`.
 
 ## Installation
 
@@ -135,6 +136,16 @@ This hook still does not run for generic Bash. It only intercepts dependency mut
 - does nothing in `observe`
 - warns without blocking in `balanced`
 - blocks in `strict` when fresh blocking results or critical pending reviews remain active
+
+### Manual agent tooling audit
+
+Run this when you want to inspect the current installed surface rather than only intercept new install commands:
+
+```bash
+guard agent audit --format json
+```
+
+The audit checks registered MCPs, local skills, plugin hooks, unpinned package runners, broad filesystem MCP scopes, inline secret-looking MCP env values, and remote bootstrap patterns.
 
 ## Runtime limits
 

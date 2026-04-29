@@ -4,6 +4,14 @@ All notable changes to Guard will be documented in this file.
 
 The format is based on Keep a Changelog and this project follows SemVer.
 
+## [0.2.3] - 2026-04-29
+
+### Added
+
+- `guard agent audit` to review installed MCP servers, skills, plugins, and hooks for risky agent-tooling configuration
+- Claude Code `agent-audit` skill for running and explaining the new audit
+- agent audit rules for unpinned package runners, broad filesystem MCPs, inline secret-looking MCP env values, and remote bootstrap patterns in MCPs, skills, and plugin hooks
+
 ## [0.2.2] - 2026-04-29
 
 ### Added

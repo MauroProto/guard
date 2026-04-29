@@ -133,6 +133,7 @@ claude --plugin-dir /absolute/path/to/guard/plugins/claude-code/guard-security
 | `guard baseline record` | - | Record the current finding set as baseline debt |
 | `guard explain` | - | Explain a rule ID or a finding fingerprint |
 | `guard policy lint` | - | Validate policy/config semantics and deprecated fields |
+| `guard agent audit` | - | Audit installed MCPs, skills, plugins, and hooks |
 
 ## What it checks
 
@@ -168,6 +169,14 @@ claude --plugin-dir /absolute/path/to/guard/plugins/claude-code/guard-security
 - new OSV advisories
 - trust regressions surfaced by `review-pr`
 
+### Agent tooling audit
+
+- MCPs registered through Claude settings or `.mcp.json`
+- unpinned `npx`, `uvx`, or `bunx` MCP package runners
+- broad filesystem MCP scopes such as root or home directory access
+- inline secret-looking MCP environment values
+- remote bootstrap patterns in MCP commands, `SKILL.md` files, and plugin hooks
+
 ## Output formats
 
 ```bash
@@ -175,6 +184,7 @@ guard scan --format terminal
 guard scan --format json
 guard scan --format sarif
 guard scan --format markdown
+guard agent audit --format json
 ```
 
 All machine-readable outputs are schema-versioned and suitable for plugin or CI consumption.

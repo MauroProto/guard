@@ -74,6 +74,8 @@ func Run(args []string) error {
 		return runExplain(rest)
 	case "policy":
 		return runPolicy(rest)
+	case "agent":
+		return runAgent(rest)
 	case "version", "v", "--version", "-v":
 		fmt.Printf("guard %s\n", engine.Version)
 		return nil
@@ -123,6 +125,7 @@ func printHelp() {
 	fmt.Fprintf(w, "    baseline      record a baseline of current findings\n")
 	fmt.Fprintf(w, "    explain       explain a rule ID or finding fingerprint\n")
 	fmt.Fprintf(w, "    policy        lint Guard policy/config\n")
+	fmt.Fprintf(w, "    agent         audit MCPs, skills, plugins, and hooks\n")
 	fmt.Fprintf(w, "    version, v    %s\n", t("cmd.version"))
 	fmt.Fprintf(w, "    help, h       %s\n\n", t("cmd.help"))
 
@@ -144,6 +147,7 @@ func printHelp() {
 	fmt.Fprintf(w, "    guard baseline record # save a baseline of current findings\n")
 	fmt.Fprintf(w, "    guard explain <id>    # explain a rule or finding fingerprint\n")
 	fmt.Fprintf(w, "    guard policy lint     # Lint Guard policy/config\n")
+	fmt.Fprintf(w, "    guard agent audit     # audit MCPs, skills, plugins, and hooks\n")
 	fmt.Fprintf(w, "    guard ab sharp        # %s\n\n", t("cmd.approve"))
 
 	fmt.Fprintf(w, "  %s\n\n", t("help.hint_lang"))
