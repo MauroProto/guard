@@ -1,0 +1,4 @@
+# Guard security-sensitive surfaces.
+/.github/workflows/ @MauroProto
+/install.sh @MauroProto
+/plugins/claude-code/guard-security/ @MauroProto

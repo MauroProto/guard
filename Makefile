@@ -4,7 +4,7 @@ VERSION  ?= dev
 GOFLAGS  := -trimpath
 LDFLAGS  := -s -w -X $(MODULE)/internal/engine.Version=$(VERSION)
 
-.PHONY: build test install clean vet plugin-check plugin-smoke
+.PHONY: build test install clean vet plugin-check plugin-smoke install-check
 
 ## build: Compile the binary
 build:
@@ -29,6 +29,10 @@ plugin-check:
 ## plugin-smoke: Run a smoke test against the Claude Code plugin wrapper and hooks
 plugin-smoke:
 	./scripts/plugin_smoke.sh
+
+## install-check: Validate installer hardening
+install-check:
+	./scripts/install_check.sh
 
 ## install: Install to GOPATH/bin
 install:

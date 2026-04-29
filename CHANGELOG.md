@@ -4,6 +4,22 @@ All notable changes to Guard will be documented in this file.
 
 The format is based on Keep a Changelog and this project follows SemVer.
 
+## [Unreleased]
+
+### Added
+
+- `SECURITY.md` with private reporting guidance and Guard-specific vulnerability scope
+- `CODEOWNERS` coverage for workflows, installer, and Claude Code plugin surfaces
+- installer hardening check in local development and CI
+- non-blocking Guard self-scan in CI for repository dogfooding
+- release artifact provenance attestations for binaries and checksum files
+
+### Changed
+
+- Claude Code plugin `Stop` hook now warns without blocking in `balanced` mode; hard stop behavior remains reserved for `strict`
+- plugin subprocess calls now use hard timeouts and record scan duration/error metadata
+- shell installer now requires checksum verification for binary fallback unless `GUARD_INSTALL_INSECURE=1` is set explicitly
+
 ## [0.2.1] - 2026-04-15
 
 ### Changed

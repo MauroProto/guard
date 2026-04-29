@@ -2,12 +2,14 @@ package engine
 
 import (
 	"context"
+	"errors"
 	"os"
 	"path/filepath"
 	"testing"
 
 	"github.com/MauroProto/guard/internal/config"
 	"github.com/MauroProto/guard/internal/model"
+	"github.com/MauroProto/guard/internal/osv"
 	"github.com/MauroProto/guard/internal/pnpm"
 )
 
@@ -150,6 +152,48 @@ func TestScanWorkspacePackages(t *testing.T) {
 	}
 }
 
+func TestScanOSVFailureAddsIncompleteDiagnostic(t *testing.T) {
+	root := t.TempDir()
+	if err := os.WriteFile(filepath.Join(root, "package.json"), []byte(`{"name":"app","packageManager":"pnpm@10.20.0","engines":{"node":">=22"}}`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	lock := `lockfileVersion: '9.0'
+packages:
+  /left-pad@1.0.0:
+    resolution: {}
+`
+	if err := os.WriteFile(filepath.Join(root, "pnpm-lock.yaml"), []byte(lock), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	cfg := config.Default()
+	cfg.OSV.Enabled = true
+	rep, err := ScanRepo(context.Background(), root, cfg, &ScanOptions{
+		Scope:     "deps",
+		OSVClient: failingOSVClient{},
+	})
+	if err != nil {
+		t.Fatalf("scan failed: %v", err)
+	}
+
+	var diagnostic *model.Finding
+	for i := range rep.Findings {
+		if rep.Findings[i].RuleID == "osv.scan.incomplete" {
+			diagnostic = &rep.Findings[i]
+			break
+		}
+	}
+	if diagnostic == nil {
+		t.Fatalf("expected osv.scan.incomplete diagnostic, got %+v", rep.Findings)
+	}
+	if diagnostic.Blocking {
+		t.Fatalf("expected diagnostic to be non-blocking, got %+v", diagnostic)
+	}
+	if diagnostic.Evidence["failed_package"] != "left-pad@1.0.0" {
+		t.Fatalf("expected failed package evidence, got %+v", diagnostic.Evidence)
+	}
+}
+
 func TestUnreviewedBuildWithUnsafePackageNameStaysManual(t *testing.T) {
 	cfg := config.Default()
 	ws := &pnpm.Workspace{
@@ -172,6 +216,12 @@ func TestUnreviewedBuildWithUnsafePackageNameStaysManual(t *testing.T) {
 	if action == nil || action.Type != model.ActionTypeManual {
 		t.Fatalf("expected manual action, got %+v", action)
 	}
+}
+
+type failingOSVClient struct{}
+
+func (failingOSVClient) Query(context.Context, osv.Query) ([]osv.Advisory, error) {
+	return nil, errors.New("osv unavailable")
 }
 
 func TestScanUsesConfiguredWorkflowPaths(t *testing.T) {

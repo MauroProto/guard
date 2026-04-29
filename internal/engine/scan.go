@@ -451,6 +451,9 @@ func scanOSV(ctx context.Context, root string, cfg *config.Config, client osv.Cl
 
 	seen := map[string]bool{}
 	var findings []model.Finding
+	var queryFailures int
+	var firstFailedPackage string
+	var firstFailureError string
 	for key := range lock.Packages {
 		name, version, ok := parsePackageKey(key)
 		if !ok {
@@ -468,6 +471,11 @@ func scanOSV(ctx context.Context, root string, cfg *config.Config, client osv.Cl
 			Ecosystem: "npm",
 		})
 		if queryErr != nil {
+			queryFailures++
+			if firstFailedPackage == "" {
+				firstFailedPackage = dedupeKey
+				firstFailureError = queryErr.Error()
+			}
 			continue
 		}
 		for _, advisory := range advisories {
@@ -490,6 +498,26 @@ func scanOSV(ctx context.Context, root string, cfg *config.Config, client osv.Cl
 				},
 			})
 		}
+	}
+	if queryFailures > 0 {
+		findings = append(findings, model.Finding{
+			RuleID:      "osv.scan.incomplete",
+			Severity:    model.SeverityLow,
+			Category:    model.CategoryOSV,
+			Title:       "OSV scan did not complete",
+			Message:     fmt.Sprintf("Guard could not check %d package(s) for OSV advisories; results may be incomplete.", queryFailures),
+			Remediation: "Retry with network access, use a populated OSV cache, or run with --no-osv when advisory lookup is intentionally disabled.",
+			File:        "pnpm-lock.yaml",
+			Actions: []model.Action{
+				model.ManualAction("Retry the scan when OSV is reachable or confirm advisory lookup is intentionally disabled."),
+			},
+			Evidence: map[string]any{
+				"failed_count":   queryFailures,
+				"failed_package": firstFailedPackage,
+				"error":          firstFailureError,
+				"diagnostic":     true,
+			},
+		})
 	}
 	return findings
 }

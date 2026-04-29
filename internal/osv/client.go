@@ -6,6 +6,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
+	"fmt"
 	"io"
 	"net/http"
 	"os"
@@ -79,22 +80,33 @@ func (c *HTTPClient) Query(ctx context.Context, q Query) ([]Advisory, error) {
 
 	resp, err := c.Client.Do(req)
 	if err != nil {
-		return parseCachedOSV(cachePath)
+		return parseCachedOSVOrError(cachePath, err)
 	}
 	defer resp.Body.Close()
 
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		return parseCachedOSV(cachePath)
+		return parseCachedOSVOrError(cachePath, fmt.Errorf("osv query failed: %s", resp.Status))
 	}
 
 	body, err := io.ReadAll(resp.Body)
 	if err != nil {
-		return parseCachedOSV(cachePath)
+		return parseCachedOSVOrError(cachePath, err)
 	}
 	_ = os.MkdirAll(c.CacheDir, 0o755)
 	_ = os.WriteFile(cachePath, body, 0o644)
 
 	return parseOSVResponse(body), nil
+}
+
+func parseCachedOSVOrError(path string, fallback error) ([]Advisory, error) {
+	advisories, err := parseCachedOSV(path)
+	if err != nil {
+		return nil, err
+	}
+	if advisories != nil {
+		return advisories, nil
+	}
+	return nil, fallback
 }
 
 type osvResponse struct {

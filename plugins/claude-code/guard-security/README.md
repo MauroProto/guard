@@ -54,7 +54,7 @@ Set the mode with `GUARD_PLUGIN_MODE`.
 - asks before external plugin, skill, MCP, or extension install commands
 - asks before remote bootstrap commands that download code and execute it inline
 - runs focused scans asynchronously after sensitive writes and dependency mutation commands
-- `Stop` acts as a safety net only for fresh blocking results from sensitive changes
+- `Stop` warns on fresh blocking results from sensitive changes but does not block the final response
 
 ### `strict`
 - denies sensitive dependency/workspace commands when relevant blocking Guard results are already active
@@ -133,8 +133,18 @@ This hook still does not run for generic Bash. It only intercepts dependency mut
 
 ### `Stop`
 - does nothing in `observe`
-- is intentionally conservative in `balanced`
-- is the last safety net in `strict`
+- warns without blocking in `balanced`
+- blocks in `strict` when fresh blocking results or critical pending reviews remain active
+
+## Runtime limits
+
+Hook subprocesses have hard timeouts so a slow Guard CLI cannot hang the agent session:
+
+- `GUARD_PLUGIN_VERSION_TIMEOUT_SECONDS`, default `2`
+- `GUARD_PLUGIN_SCAN_TIMEOUT_SECONDS`, default `20`
+
+When a scan times out or does not return JSON, the plugin records an error in
+the per-repo state instead of reporting the scope as clean.
 
 ## What it does not do
 

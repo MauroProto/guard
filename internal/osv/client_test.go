@@ -60,6 +60,27 @@ func TestHTTPClientOfflineWithoutCacheReturnsEmpty(t *testing.T) {
 	}
 }
 
+func TestHTTPClientOnlineFailureWithoutCacheReturnsError(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		http.Error(w, "upstream unavailable", http.StatusBadGateway)
+	}))
+	defer server.Close()
+
+	client := &HTTPClient{
+		BaseURL:  server.URL,
+		Client:   server.Client(),
+		CacheDir: t.TempDir(),
+	}
+
+	advisories, err := client.Query(context.Background(), Query{Name: "left-pad", Version: "1.0.0", Ecosystem: "npm"})
+	if err == nil {
+		t.Fatal("expected online OSV failure without cache to return an error")
+	}
+	if len(advisories) != 0 {
+		t.Fatalf("expected no advisories on failure, got %+v", advisories)
+	}
+}
+
 func TestCacheKeyStable(t *testing.T) {
 	first := cacheKey(Query{Name: "pkg", Version: "1.0.0", Ecosystem: "npm"})
 	second := cacheKey(Query{Name: "pkg", Version: "1.0.0", Ecosystem: "npm"})

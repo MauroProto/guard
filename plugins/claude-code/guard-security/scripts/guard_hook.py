@@ -7,6 +7,7 @@ import os
 import re
 import subprocess
 import sys
+import time
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
@@ -16,6 +17,8 @@ from typing import Any
 SCOPES = ("deps", "workspace", "policy", "workflows", "agent")
 DEFAULT_WORKFLOW_DIRS = [".github/workflows"]
 DEFAULT_MODE = "balanced"
+DEFAULT_VERSION_TIMEOUT_SECONDS = 2.0
+DEFAULT_SCAN_TIMEOUT_SECONDS = 20.0
 
 
 def now_utc() -> str:
@@ -47,6 +50,29 @@ def normalize_mode(value: str | None) -> str:
     if mode not in {"observe", "balanced", "strict"}:
         return DEFAULT_MODE
     return mode
+
+
+def env_timeout_seconds(name: str, default: float) -> float:
+    raw = os.environ.get(name)
+    if not raw:
+        return default
+    try:
+        value = float(raw)
+    except ValueError:
+        return default
+    if value <= 0:
+        return default
+    return value
+
+
+def timeout_label(seconds: float) -> str:
+    if seconds.is_integer():
+        return str(int(seconds))
+    return f"{seconds:.1f}".rstrip("0").rstrip(".")
+
+
+def elapsed_ms(started: float) -> int:
+    return int((time.monotonic() - started) * 1000)
 
 
 def repo_key(repo_root: Path) -> str:
@@ -127,6 +153,7 @@ def default_scope_state() -> dict[str, Any]:
         "last_files": [],
         "last_command": "",
         "last_error": "",
+        "last_duration_ms": 0,
         "needs_attention": False,
     }
 
@@ -238,13 +265,18 @@ class Runtime:
     def guard_available(self) -> tuple[bool, str]:
         if not self.wrapper.is_file():
             return False, f"wrapper missing at {self.wrapper}"
-        proc = subprocess.run(
-            [str(self.wrapper), "version"],
-            cwd=str(self.repo_root) if self.repo_root else None,
-            capture_output=True,
-            text=True,
-            check=False,
-        )
+        timeout = env_timeout_seconds("GUARD_PLUGIN_VERSION_TIMEOUT_SECONDS", DEFAULT_VERSION_TIMEOUT_SECONDS)
+        try:
+            proc = subprocess.run(
+                [str(self.wrapper), "version"],
+                cwd=str(self.repo_root) if self.repo_root else None,
+                capture_output=True,
+                text=True,
+                check=False,
+                timeout=timeout,
+            )
+        except subprocess.TimeoutExpired:
+            return False, f"Guard CLI version check timed out after {timeout_label(timeout)}s"
         if proc.returncode != 0:
             reason = proc.stderr.strip() or proc.stdout.strip() or "Guard CLI unavailable"
             return False, reason
@@ -256,16 +288,28 @@ class Runtime:
         *,
         report_name: str,
         allow_failure: bool = True,
-    ) -> tuple[int, dict[str, Any] | None, str]:
+    ) -> tuple[int, dict[str, Any] | None, str, int]:
         report_path = self.report_path(report_name)
         cmd = [str(self.wrapper), *args]
-        proc = subprocess.run(
-            cmd,
-            cwd=str(self.repo_root) if self.repo_root else None,
-            capture_output=True,
-            text=True,
-            check=False,
-        )
+        timeout = env_timeout_seconds("GUARD_PLUGIN_SCAN_TIMEOUT_SECONDS", DEFAULT_SCAN_TIMEOUT_SECONDS)
+        started = time.monotonic()
+        try:
+            proc = subprocess.run(
+                cmd,
+                cwd=str(self.repo_root) if self.repo_root else None,
+                capture_output=True,
+                text=True,
+                check=False,
+                timeout=timeout,
+            )
+        except subprocess.TimeoutExpired:
+            return (
+                124,
+                None,
+                f"guard command timed out after {timeout_label(timeout)}s: {' '.join(args)}",
+                elapsed_ms(started),
+            )
+        duration_ms = elapsed_ms(started)
         stdout = proc.stdout.strip()
         stderr = proc.stderr.strip()
         data: dict[str, Any] | None = None
@@ -280,7 +324,7 @@ class Runtime:
             report_path.write_text(stdout + "\n", encoding="utf-8")
         if proc.returncode != 0 and not allow_failure and data is None:
             raise RuntimeError(stderr or stdout or f"guard command failed: {' '.join(args)}")
-        return proc.returncode, data, stderr or stdout
+        return proc.returncode, data, stderr or stdout, duration_ms
 
     def workflow_dirs(self) -> list[str]:
         if self.repo_root is None:
@@ -550,6 +594,7 @@ def update_scope_from_scan(
     report_path: Path | None,
     files: list[str] | None = None,
     error: str = "",
+    duration_ms: int = 0,
     needs_attention: bool = False,
 ) -> None:
     if runtime.state is None:
@@ -565,6 +610,7 @@ def update_scope_from_scan(
     target["last_files"] = files or []
     target["last_command"] = ""
     target["last_error"] = error
+    target["last_duration_ms"] = duration_ms
     target["needs_attention"] = bool(needs_attention and status == "blocking")
 
 
@@ -781,17 +827,18 @@ def run_scan(
     elif changed_files:
         args.append("--changed-files")
     report_path = runtime.report_path(scope)
-    returncode, data, stderr = runtime.run_guard(args, report_name=scope)
+    returncode, data, stderr, duration_ms = runtime.run_guard(args, report_name=scope)
     status, blocking, warnings = parse_scan_result(data)
     error = ""
-    if data is None and returncode != 0:
-        error = stderr or f"guard scan failed for scope {scope}"
-        if changed_files:
+    if data is None:
+        error = stderr or f"guard scan did not return JSON for scope {scope}"
+        if changed_files and returncode != 124:
             fallback_args = ["scan", "--root", str(runtime.repo_root), "--scope", scope, "--format", "json", "--no-color"]
-            fallback_return, fallback_data, fallback_stderr = runtime.run_guard(
+            fallback_return, fallback_data, fallback_stderr, fallback_duration_ms = runtime.run_guard(
                 fallback_args,
                 report_name=f"{scope}-fallback",
             )
+            duration_ms += fallback_duration_ms
             if fallback_data is not None:
                 data = fallback_data
                 returncode = fallback_return
@@ -799,6 +846,8 @@ def run_scan(
                 report_path = runtime.report_path(f"{scope}-fallback")
                 status, blocking, warnings = parse_scan_result(data)
                 error = ""
+            elif fallback_return != 0:
+                error = fallback_stderr or f"guard scan failed for scope {scope}"
     update_scope_from_scan(
         runtime,
         scope,
@@ -809,6 +858,7 @@ def run_scan(
         report_path=report_path,
         files=files,
         error=error,
+        duration_ms=duration_ms,
         needs_attention=trigger in {"post_write", "post_bash"},
     )
     summary = summarize_scope(scope, status if not error else "warning", blocking, warnings)
@@ -821,8 +871,10 @@ def run_policy_review(runtime: Runtime, *, trigger: str, files: list[str] | None
     assert runtime.repo_root is not None
     lint_report_path = runtime.report_path("policy-lint")
     lint_args = ["policy", "lint", "--root", str(runtime.repo_root), "--format", "json", "--no-color"]
-    _, lint_data, lint_stderr = runtime.run_guard(lint_args, report_name="policy-lint")
+    lint_returncode, lint_data, lint_stderr, lint_duration_ms = runtime.run_guard(lint_args, report_name="policy-lint")
     lint_status, lint_blocking, lint_warnings = parse_lint_result(lint_data)
+    if lint_data is None and lint_returncode != 0:
+        lint_status = "error"
 
     scan_status, scan_blocking, scan_warnings, _ = run_scan(
         runtime,
@@ -845,6 +897,7 @@ def run_policy_review(runtime: Runtime, *, trigger: str, files: list[str] | None
     target["last_files"] = files or []
     target["last_command"] = ""
     target["lint_report_path"] = str(lint_report_path) if lint_report_path else ""
+    target["lint_duration_ms"] = lint_duration_ms
     if lint_data is None and lint_stderr:
         target["last_error"] = lint_stderr
     summary = summarize_policy(combined_status, blocking, warnings)
@@ -1087,8 +1140,11 @@ def stop_summary(runtime: Runtime) -> dict[str, Any] | None:
             runtime.scope_state(scope)["needs_attention"] = False
         runtime.save_state()
         return {
-            "decision": "block",
-            "reason": "Guard found blocking results in " + ", ".join(blocking_scopes) + ". Address them or explicitly choose to continue.",
+            "additionalContext": (
+                "Guard found blocking results in "
+                + ", ".join(blocking_scopes)
+                + ". Review them before continuing. Balanced mode does not block the final response; use strict mode or CI for hard stop behavior."
+            ),
         }
 
     if runtime.mode == "strict" and (blocking_scopes or pending_scopes):

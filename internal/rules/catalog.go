@@ -202,6 +202,15 @@ var catalog = map[string]Spec{
 		Evidence:        "OSV returned one or more advisories for the package version.",
 		Remediation:     "Upgrade to a patched version or document a temporary exception.",
 	},
+	"osv.scan.incomplete": {
+		ID:              "osv.scan.incomplete",
+		DefaultSeverity: model.SeverityLow,
+		Confidence:      0.9,
+		Description:     "OSV advisory scan did not complete for all packages.",
+		Rationale:       "Incomplete advisory checks must be visible so clean output is not confused with unchecked output.",
+		Evidence:        "One or more OSV package queries failed without a usable cached response.",
+		Remediation:     "Retry when OSV is reachable, use a populated cache, or explicitly disable OSV when advisory lookup is not required.",
+	},
 	"review.diff.install_script.added": {
 		ID:              "review.diff.install_script.added",
 		DefaultSeverity: model.SeverityCritical,

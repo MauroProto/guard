@@ -35,6 +35,11 @@ Links:
 | Guard CLI (shell) | `curl -fsSL https://raw.githubusercontent.com/MauroProto/guard/main/install.sh \| sh` |
 | From source | `git clone https://github.com/MauroProto/guard.git && cd guard && make install` |
 
+`go install` is the preferred CLI install path. The shell installer uses
+pre-built release binaries only when Go is unavailable, and it requires a
+matching SHA-256 checksum unless `GUARD_INSTALL_INSECURE=1` is set explicitly
+for local testing.
+
 If the Claude Code plugin cannot find the `guard` binary in `PATH`, set:
 
 ```bash
@@ -205,6 +210,7 @@ cd guard
 make build
 make test
 make vet
+make install-check
 make plugin-check
 make plugin-smoke
 ```

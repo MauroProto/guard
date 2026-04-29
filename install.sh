@@ -19,6 +19,7 @@ RESET='\033[0m'
 info() { printf "  ${CYAN}ℹ${RESET} %s\n" "$1"; }
 ok()   { printf "  ${GREEN}✔${RESET} %s\n" "$1"; }
 fail() { printf "  ${RED}✖${RESET} %s\n" "$1"; exit 1; }
+insecure_install() { [ "${GUARD_INSTALL_INSECURE:-}" = "1" ]; }
 
 printf "\n  🛡  ${BOLD}Guard Installer${RESET}\n\n"
 
@@ -66,21 +67,25 @@ RELEASE_URL="https://github.com/${REPO}/releases/latest/download/guard-${OS}-${A
 CHECKSUM_URL="https://github.com/${REPO}/releases/latest/download/guard-checksums.txt"
 TMP=$(mktemp)
 CHECKSUM_TMP=$(mktemp)
+trap 'rm -f "$TMP" "$CHECKSUM_TMP"' EXIT
+CHECKSUM_DOWNLOADED=0
 
 if command -v curl > /dev/null 2>&1; then
     curl -fsSL "$RELEASE_URL" -o "$TMP" 2>/dev/null
-    curl -fsSL "$CHECKSUM_URL" -o "$CHECKSUM_TMP" 2>/dev/null || true
+    if curl -fsSL "$CHECKSUM_URL" -o "$CHECKSUM_TMP" 2>/dev/null; then
+        CHECKSUM_DOWNLOADED=1
+    fi
 elif command -v wget > /dev/null 2>&1; then
     wget -q "$RELEASE_URL" -O "$TMP" 2>/dev/null
-    wget -q "$CHECKSUM_URL" -O "$CHECKSUM_TMP" 2>/dev/null || true
+    if wget -q "$CHECKSUM_URL" -O "$CHECKSUM_TMP" 2>/dev/null; then
+        CHECKSUM_DOWNLOADED=1
+    fi
 else
     fail "Neither curl nor wget found."
 fi
 
 if [ ! -s "$TMP" ]; then
     # No pre-built binary yet — guide to install Go
-    rm -f "$TMP"
-    rm -f "$CHECKSUM_TMP"
     printf "\n  ${DIM}Pre-built binaries not available yet.${RESET}\n"
     printf "  ${DIM}Install Go first, then run:${RESET}\n\n"
     printf "  ${CYAN}go install github.com/${REPO}/cmd/guard@latest${RESET}\n\n"
@@ -95,20 +100,32 @@ fi
 
 chmod +x "$TMP"
 
-if [ -s "$CHECKSUM_TMP" ]; then
+if [ "$CHECKSUM_DOWNLOADED" -ne 1 ] || [ ! -s "$CHECKSUM_TMP" ]; then
+    if insecure_install; then
+        info "Skipping checksum verification because GUARD_INSTALL_INSECURE=1."
+    else
+        fail "Checksum file is required for binary installation. Install Go and use go install, or set GUARD_INSTALL_INSECURE=1 to bypass."
+    fi
+else
     EXPECTED=$(grep "  guard-${OS}-${ARCH}\$" "$CHECKSUM_TMP" | awk '{print $1}')
-    if [ -n "$EXPECTED" ]; then
-        if command -v shasum > /dev/null 2>&1; then
-            ACTUAL=$(shasum -a 256 "$TMP" | awk '{print $1}')
-        elif command -v sha256sum > /dev/null 2>&1; then
-            ACTUAL=$(sha256sum "$TMP" | awk '{print $1}')
+    if [ -z "$EXPECTED" ]; then
+        if insecure_install; then
+            info "Skipping checksum entry verification because GUARD_INSTALL_INSECURE=1."
         else
-            ACTUAL=""
+            fail "No checksum entry found for guard-${OS}-${ARCH}."
         fi
-        if [ -n "$ACTUAL" ] && [ "$ACTUAL" != "$EXPECTED" ]; then
-            rm -f "$TMP" "$CHECKSUM_TMP"
-            fail "Checksum verification failed."
-        fi
+    elif command -v shasum > /dev/null 2>&1; then
+        ACTUAL=$(shasum -a 256 "$TMP" | awk '{print $1}')
+    elif command -v sha256sum > /dev/null 2>&1; then
+        ACTUAL=$(sha256sum "$TMP" | awk '{print $1}')
+    elif insecure_install; then
+        info "Skipping checksum verification because GUARD_INSTALL_INSECURE=1 and no SHA-256 checksum tool was found."
+    else
+        fail "No SHA-256 checksum tool found. Install shasum or sha256sum, or set GUARD_INSTALL_INSECURE=1 to bypass."
+    fi
+
+    if [ -n "${ACTUAL:-}" ] && [ "$ACTUAL" != "$EXPECTED" ]; then
+        fail "Checksum verification failed."
     fi
 fi
 
@@ -123,4 +140,3 @@ else
 fi
 
 printf "\n  ${GREEN}${BOLD}Done!${RESET} Run ${CYAN}guard${RESET} to get started.\n\n"
-rm -f "$CHECKSUM_TMP"

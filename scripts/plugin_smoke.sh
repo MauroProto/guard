@@ -139,6 +139,14 @@ PRE_OBSERVE="$(GUARD_PLUGIN_MODE=observe run_hook "$PLUGIN_ROOT/scripts/pre_bash
   CWD="$TEST_REPO" TRANSCRIPT="$TRANSCRIPT_PATH" SESSION_ID="sess-1" COMMAND="pnpm add sharp")"
 json_assert "$PRE_OBSERVE" '"permissionDecision" not in data["hookSpecificOutput"]'
 
+PRE_READONLY="$(GUARD_PLUGIN_MODE=balanced run_hook "$PLUGIN_ROOT/scripts/pre_bash_guard.sh" "$FIXTURES_DIR/pre_bash.json" \
+  CWD="$TEST_REPO" TRANSCRIPT="$TRANSCRIPT_PATH" SESSION_ID="sess-1" COMMAND="ls")"
+[[ -z "$PRE_READONLY" ]]
+
+PRE_TEST="$(GUARD_PLUGIN_MODE=balanced run_hook "$PLUGIN_ROOT/scripts/pre_bash_guard.sh" "$FIXTURES_DIR/pre_bash.json" \
+  CWD="$TEST_REPO" TRANSCRIPT="$TRANSCRIPT_PATH" SESSION_ID="sess-1" COMMAND="pnpm test")"
+[[ -z "$PRE_TEST" ]]
+
 PRE_BALANCED="$(GUARD_PLUGIN_MODE=balanced run_hook "$PLUGIN_ROOT/scripts/pre_bash_guard.sh" "$FIXTURES_DIR/pre_bash.json" \
   CWD="$TEST_REPO" TRANSCRIPT="$TRANSCRIPT_PATH" SESSION_ID="sess-1" COMMAND="pnpm add sharp")"
 json_assert "$PRE_BALANCED" 'data["hookSpecificOutput"]["permissionDecision"] == "ask"'
@@ -210,10 +218,49 @@ json_assert "$PRE_REMOTE_STRICT" 'data["hookSpecificOutput"]["permissionDecision
 
 STOP_BALANCED="$(GUARD_PLUGIN_MODE=balanced run_hook "$PLUGIN_ROOT/scripts/stop_summary.sh" "$FIXTURES_DIR/stop.json" \
   CWD="$TEST_REPO" TRANSCRIPT="$TRANSCRIPT_PATH" SESSION_ID="sess-1" LAST_ASSISTANT="done" STOP_HOOK_ACTIVE="false")"
-json_assert "$STOP_BALANCED" 'data["decision"] == "block"'
+json_assert "$STOP_BALANCED" '"decision" not in data'
+json_assert "$STOP_BALANCED" '"additionalContext" in data'
+json_assert "$STOP_BALANCED" '"blocking" in data["additionalContext"].lower()'
+
+python3 - "$(state_path)" <<'PY'
+import json
+import sys
+
+path = sys.argv[1]
+with open(path, "r", encoding="utf-8") as fh:
+    data = json.load(fh)
+data["scopes"]["deps"]["status"] = "blocking"
+data["scopes"]["deps"]["blocking_count"] = 1
+data["scopes"]["deps"]["needs_attention"] = True
+with open(path, "w", encoding="utf-8") as fh:
+    json.dump(data, fh, indent=2, sort_keys=True)
+    fh.write("\n")
+PY
+
+STOP_STRICT="$(GUARD_PLUGIN_MODE=strict run_hook "$PLUGIN_ROOT/scripts/stop_summary.sh" "$FIXTURES_DIR/stop.json" \
+  CWD="$TEST_REPO" TRANSCRIPT="$TRANSCRIPT_PATH" SESSION_ID="sess-1" LAST_ASSISTANT="done" STOP_HOOK_ACTIVE="false")"
+json_assert "$STOP_STRICT" 'data["decision"] == "block"'
 
 STOP_ACTIVE="$(GUARD_PLUGIN_MODE=balanced run_hook "$PLUGIN_ROOT/scripts/stop_summary.sh" "$FIXTURES_DIR/stop.json" \
   CWD="$TEST_REPO" TRANSCRIPT="$TRANSCRIPT_PATH" SESSION_ID="sess-1" LAST_ASSISTANT="done" STOP_HOOK_ACTIVE="true")"
 [[ -z "$STOP_ACTIVE" ]]
+
+SLOW_GUARD="$TMPDIR/slow-guard"
+cat > "$SLOW_GUARD" <<'EOF'
+#!/usr/bin/env sh
+if [ "${1:-}" = "version" ]; then
+  printf 'guard dev\n'
+  exit 0
+fi
+sleep 5
+EOF
+chmod +x "$SLOW_GUARD"
+
+POST_TIMEOUT="$(GUARD_BIN="$SLOW_GUARD" GUARD_PLUGIN_MODE=balanced GUARD_PLUGIN_SCAN_TIMEOUT_SECONDS=1 run_hook "$PLUGIN_ROOT/scripts/post_bash_guard.sh" "$FIXTURES_DIR/post_bash.json" \
+  CWD="$TEST_REPO" TRANSCRIPT="$TRANSCRIPT_PATH" SESSION_ID="sess-1" COMMAND="pnpm install")"
+json_assert "$POST_TIMEOUT" '"timed out" in data["additionalContext"].lower()'
+state_assert 'data["scopes"]["deps"]["status"] == "error"'
+state_assert '"timed out" in data["scopes"]["deps"]["last_error"].lower()'
+state_assert 'data["scopes"]["deps"]["last_duration_ms"] >= 1000'
 
 echo "plugin smoke OK"
