@@ -1,7 +1,7 @@
 ---
 name: approve-build-guided
 description: Use this skill when Guard reports pending build approvals and the user wants a scoped, explicit approve-build workflow.
-version: 0.2.1
+version: 0.2.2
 ---
 
 # Approve Build Guided

@@ -4,7 +4,7 @@ All notable changes to Guard will be documented in this file.
 
 The format is based on Keep a Changelog and this project follows SemVer.
 
-## [Unreleased]
+## [0.2.2] - 2026-04-29
 
 ### Added
 
